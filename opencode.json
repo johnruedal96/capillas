@@ -1,0 +1,107 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "project": "Capillas de la Fe — Asistente Comercial IA",
+  "instructions": ["AGENTS.md", "docs/propuesta_tecnologica.md"],
+
+  "agent": {
+    "widget-dev": {
+      "description": "Desarrolla el widget frontend en Lit 3 + Custom Elements. Build con Vite IIFE.",
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-6",
+      "permission": { "edit": "allow", "bash": "allow" }
+    },
+    "bff-dev": {
+      "description": "Desarrolla el BFF (Backend for Frontend) en FastAPI con SSE streaming.",
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-6",
+      "permission": { "edit": "allow", "bash": "allow" }
+    },
+    "rag-dev": {
+      "description": "Desarrolla el RAG Service con LlamaIndex, pgvector, Claude Bedrock.",
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-6",
+      "permission": { "edit": "allow", "bash": "allow" }
+    },
+    "infra-dev": {
+      "description": "Desarrolla infraestructura AWS con Terraform: ECS Fargate, Aurora, Cognito, API Gateway.",
+      "mode": "subagent",
+      "model": "anthropic/claude-sonnet-4-6",
+      "permission": { "edit": "allow", "bash": "allow" }
+    }
+  },
+
+  "command": {
+    "deploy-infra": {
+      "description": "Despliega infraestructura AWS con Terraform",
+      "agent": "infra-dev",
+      "template": "Despliega la infraestructura Terraform con: $ARGUMENTS. Usa terraform plan y terraform apply."
+    },
+    "build-widget": {
+      "description": "Compila el widget frontend",
+      "template": "Compila el widget con Vite en modo IIFE. build: npm run build en src/widget/"
+    },
+    "deploy-all": {
+      "description": "Despliega todo el sistema (infra + servicios + widget)",
+      "template": "Despliega completa: infra, microservicios ECS, y widget a S3/CloudFront"
+    },
+    "test-rag": {
+      "description": "Ejecuta pruebas del pipeline RAG",
+      "template": "Ejecuta pruebas del RAG Service: ingresar documento de prueba, hacer query, verificar respuesta"
+    }
+  },
+
+  "mcp": {
+    "github": {
+      "type": "remote",
+      "url": "https://api.github.com",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+      }
+    },
+    "websearch": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-websearch"],
+      "enabled": true
+    },
+    "fetch": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-fetch"],
+      "enabled": true
+    }
+  },
+
+  "references": {
+    "docs": {
+      "path": "docs",
+      "description": "Documentación del proyecto: propuesta tecnológica, contexto de negocio, arquitectura RAG"
+    },
+    "aws-bedrock": {
+      "repository": "aws/aws-sdk-js-v3",
+      "description": "AWS SDK para Bedrock, Cognito, ECS, Aurora"
+    },
+    "lit": {
+      "repository": "lit/lit",
+      "description": "Lit 3 - Web Components framework para el widget"
+    },
+    "llamaindex": {
+      "repository": "run-llama/llama_index",
+      "description": "LlamaIndex framework para RAG pipeline"
+    }
+  },
+
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "git *": "allow",
+      "npm *": "allow",
+      "pip *": "allow",
+      "terraform *": "allow",
+      "docker *": "allow",
+      "aws *": "allow",
+      "*": "ask"
+    },
+    "task": "allow"
+  }
+}

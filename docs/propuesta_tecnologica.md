@@ -1,7 +1,7 @@
 # PROPUESTA TECNOLÓGICA
 ## Sistema de Asesor Comercial Aumentado con IA — Capillas de la Fe
 
-**Versión:** 1.0  
+**Versión:** 1  
 **Fecha:** Junio 2026  
 **Clasificación:** Confidencial — Capillas de la Fe  
 **Tasa de cambio:** $1 USD = $3,450 COP (referencia junio 2026)
@@ -78,6 +78,7 @@ graph TB
     HostApp -->|script tag| CDN
     HostApp -->|HTTPS| WIDGET
     WIDGET -->|POST cifrado| GW
+    KBADMIN[KB Admin Widget<br/>Lit 3 gestion docs] -->|POST cifrado| GW
     GW -->|HTTP| BFF
     GW -->|OAuth| AUTH
     GW -->|Async| ANALYTICS
@@ -88,6 +89,9 @@ graph TB
     RAG -->|Bedrock API| BEDROCK
     KMS -.->|Encripta| AURORA
     KMS -.->|Encripta| REDIS
+    KBADMIN -->|Sube docs cifrados| S3[Amazon S3 Documentos fuente]
+    S3 -->|Evento| STEP[Step Functions<br/>Pipeline ingesta]
+    STEP -->|Procesa| RAG
 ```
 
 ### 2.2 Flujo de Consulta (Asesor → Respuesta)
@@ -286,9 +290,85 @@ class CypherClient {
 }
 ```
 
+#### 3.1.7 Widget de Administración de Knowledge Base (KB Admin Widget)
+
+Al igual que el widget de chat, el panel de administración de la base de conocimiento se construye como un **Lit 3 Custom Element empaquetado como IIFE**, con la misma arquitectura de cifrado X-Cypher. Esto permite **reutilizarlo en cualquier cliente** con un simple `<script>` tag, sin importar el framework del host. Los asesores NUNCA ven este panel — solo los administradores lo usan para gestionar documentos.
+
+**Instalación:**
+```html
+<script src="https://cdn.capillas.ai/admin/v1/kb-admin.js" defer></script>
+<mi-kb-admin 
+  api-key="live_abc123_def456"
+  mode="full"
+  lang="es">
+</mi-kb-admin>
+```
+
+**Funcionalidades:**
+
+| Funcionalidad | Descripción |
+|--------------|-------------|
+| **Subida de documentos** | Arrastrar y soltar PDF, DOCX, MD, TXT. Carga batch. |
+| **Previsualización** | Ver el documento original y cómo queda dividido en chunks después del procesamiento |
+| **Metadatos** | Etiquetar documentos por categoría (planes, objetos, playbooks, clientes, reglas) |
+| **Chunk viewer** | Ver y editar los fragmentos generados automáticamente, ajustar solapamiento |
+| **Búsqueda de prueba** | Probar queries de prueba y ver qué chunks retorna el sistema antes de desplegar |
+| **Historial de ingesta** | Ver estado de cada documento (pendiente, procesando, indexado, error) |
+| **Gestión de versiones** | Reemplazar/reindexar documentos sin perder el histórico |
+
+**Stack:**
+
+| Componente | Tecnología | Notas |
+|------------|-----------|-------|
+| Framework | Lit 3 | Mismo que el widget de chat |
+| Build | Vite IIFE | Mismo bundle, mismo formato |
+| Autenticación | Cognito (rol admin) | Mismo user pool, distinto rol |
+| Cifrado | X-Cypher (AES-256-GCM) | **Misma estrategia que el chat** — nada viaja en texto plano |
+| Hosting | S3 + CloudFront | Mismo CDN, ruta `/admin/` |
+| API | Knowledge Base Service (FastAPI) | Endpoints protegidos con X-Cypher |
+| Pipeline ingesta | S3 → Step Functions → Lambda → pgvector | Automático |
+
+**Flujo de comunicación cifrada (idéntico al widget de chat):**
+```
+KB Admin Widget                          API Gateway + Lambda@Edge
+    │                                           │
+    │  POST /api/kb/upload                      │
+    │  Body: ciphertext (AES-256-GCM)           │
+    │  X-Cypher-Headers: {Authorization, ...}   │
+    │  X-Cypher-Enabled: true                   │
+    │──────────────────────────────────────────▶│
+    │                                           │→ Descifra → KB Service
+    │  Response: ciphertext                     │← Cifra ←
+    │◀──────────────────────────────────────────│
+    │
+    │  (Si B2B: X-Cypher-Enabled: false → JSON plano)
+```
+
+**Flujo de ingesta de documentos:**
+
+```
+KB Admin Panel (admin)
+    │ Sube PDF/DOCX/MD
+    ▼
+API Gateway → BFF → Knowledge Base Service
+    │ Guarda archivo en S3 (bucket raw/)
+    ▼
+S3 Event Notification
+    │
+    ▼
+Step Functions
+    │ 1. Lambda parser (extrae texto, imágenes)
+    │ 2. Lambda chunker (divide en fragmentos, solapamiento 10%)
+    │ 3. Extrae metadatos (categoría, tags, fecha)
+    │ 4. Genera embeddings con Titan Embeddings V2
+    │ 5. Almacena en Aurora pgvector (HNSW index)
+    ▼
+Notificar al panel: "Documento indexado correctamente"
+```
+
 ### 3.2 Backend — Microservicios
 
-> **Nota sobre terminología:**
+> **Nota sobre terminología:****
 > - **BFF** (Backend for Frontend): servicio intermediario entre el widget y los microservicios internos. Es el único servicio expuesto al exterior (vía API Gateway). Maneja sesiones, orquestación de requests y formateo de respuestas.
 > - **gRPC**: protocolo de comunicación **back-to-back** entre microservicios internos (BFF ↔ RAG Service, RAG ↔ Knowledge Base). No se usa para comunicación con el widget ni con el frontend. El widget siempre se comunica vía HTTPS con el BFF. gRPC se elige por su eficiencia (Protocol Buffers, streaming bidireccional, tipado fuerte) para el tráfico interno entre servicios dentro de la VPC.
 
@@ -825,56 +905,184 @@ Bedrock (Claude) — NUNCA recibe datos personales
 
 ---
 
-## 6. Plan de Implementación
+## 6. Plan de Implementación — Scrum con Entregas Incrementales
 
-### 6.1 Timeline General
+### 6.1 Metodología
 
-| Fase | Duración | Semanas | Hitos |
-|------|----------|---------|-------|
-| **Fase 1: Fundación** | 5 semanas | 1-5 | Infraestructura AWS, Auth, Widget base, X-Cypher edge |
-| **Fase 2: RAG Pipeline** | 5 semanas | 6-10 | Knowledge Base, RAG Service, Embeddings |
-| **Fase 3: Asistente Completo** | 5 semanas | 11-15 | Asistente integrado, Piloto con asesores |
-| **Fase 4: Optimización** | 5 semanas | 16-20 | WhatsApp, Analytics, Escalamiento |
+El proyecto se desarrolla con **Scrum** adaptado a un equipo de 1 persona (desarrollador full-stack). Cada **sprint de 2 semanas** produce un incremento funcional desplegado en ambiente de pruebas (QA) para que el cliente vea el progreso y dé feedback.
 
-### 6.2 Fase 1: Fundación (Semanas 1-5)
+| Rol | Quién |
+|-----|-------|
+| Product Owner | Cliente (Capillas de la Fe) |
+| Scrum Master / Dev | Nosotros |
+| Sprint Review (demo) | Cada 2 semanas, miércoles, 1 hora |
+| Sprint Planning | Cada 2 semanas, después del review |
+| Daily sync | 3 veces por semana, 15 min (chat asíncrono) |
+| Herramienta | GitHub Projects o Trello |
 
-| Semana | Actividades | Entregables |
-|--------|------------|-------------|
-| **1** | Setup cuenta AWS, IAM, redes VPC, Security Groups | Infraestructura base Terraform |
-| **2** | Cognito User Pool, OAuth config, Hosted UI | Auth service funcional |
-| **3** | Widget base (Lit 3), Custom Element, Shadow DOM | Widget con login flow |
-| **4** | API Gateway + Lambda@Edge (descifrador), BFF service, CI/CD | BFF + X-Cypher funcional |
-| **5** | Integración widget → X-Cypher → BFF → Auth → tests | End-to-end login flow con cifrado |
+### 6.2 Ambientes
 
-### 6.3 Fase 2: RAG Pipeline (Semanas 6-10)
+| Ambiente | Propósito | AWS Costo adicional/mes |
+|----------|-----------|------------------------|
+| **QA/Staging** | Pruebas del cliente, demos, feedback | ~$100-150/mes (~$345K-517K COP) |
+| **Producción** | Asesores reales | ~$523/mes (~$1.8M COP) |
 
-| Semana | Actividades | Entregables |
-|--------|------------|-------------|
-| **6** | Aurora Serverless v2 + pgvector setup, schema | Vector DB operativa |
-| **7** | Pipeline de ingesta: S3 → Step Functions → Embeddings → pgvector | Ingesta de documentos funcional |
-| **8** | RAG Service (LlamaIndex): chunking, embedding, indexación | RAG service v1 |
-| **9** | Hybrid search, metadata filters, cross-encoder reranker | Retrieval optimizado |
-| **10** | Claude en Bedrock, prompt engineering, Guardrails | RAG pipeline completo |
+> Costo total AWS con ambos ambientes: ~$623-673/mes (~$2.1-2.3M COP).
+> El ambiente QA usa servicios más pequeños (0.5 ACU Aurora, Fargate tareas spot).
 
-### 6.4 Fase 3: Asistente Completo (Semanas 11-15)
+### 6.3 Sprints y Roadmap
 
-| Semana | Actividades | Entregables |
-|--------|------------|-------------|
-| **11** | Integración RAG → BFF → Widget (SSE streaming cifrado) | Asistente funcional end-to-end |
-| **12** | Semantic cache (Redis), optimización de latencia | Cache operativo |
-| **13** | Knowledge Base Service, administración de documentos | KB admin UI |
-| **14** | Piloto con 5-10 asesores, feedback, ajustes | Piloto funcionando |
-| **15** | Ajustes según feedback, refinamiento prompts | Piloto validado |
+```mermaid
+gantt
+    title Roadmap Scrum - 20 Semanas
+    dateFormat  YYYY-MM-DD
+    axisFormat  %b %d
 
-### 6.5 Fase 4: Optimización y Expansión (Semanas 16-20)
+    section Sprint 1-2: Fundacion
+    Sprint 1 - Infraestructura + Auth     :s1, 2026-07-01, 14d
+    Sprint 2 - Widget base + BFF          :s2, after s1, 14d
 
-| Semana | Actividades | Entregables |
-|--------|------------|-------------|
-| **16** | Analytics Service, dashboard de métricas | Dashboard operativo |
-| **17** | Monitoreo (LangFuse, Grafana), alertas | Observabilidad completa |
-| **18** | Expansión a más asesores (50-100) | Producción escalada |
-| **19** | Integración WhatsApp (Twilio + canal) | Fase 2 del roadmap |
-| **20** | Documentación, hardening seguridad, optimización costos | Sistema listo para producción |
+    section Sprint 3-4: Chat con IA
+    Sprint 3 - RAG simple + KB Admin v1   :s3, after s2, 14d
+    Sprint 4 - Chat funcional + Ingesta    :s4, after s3, 14d
+
+    section Sprint 5-7: Piloto
+    Sprint 5 - Chat completo con cifrado   :s5, after s4, 14d
+    Sprint 6 - Piloto 5-10 asesores        :s6, after s5, 14d
+    Sprint 7 - Ajustes post-piloto         :s7, after s6, 14d
+
+    section Sprint 8-10: Optimizacion
+    Sprint 8 - Admin KB completo           :s8, after s7, 14d
+    Sprint 9 - Cache + Performance         :s9, after s8, 14d
+    Sprint 10 - Analytics + Seguridad      :s10, after s9, 14d
+```
+
+### 6.4 Detalle de Sprints
+
+#### Sprint 1: Infraestructura + Auth (semana 1-2)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Setup cuenta AWS, IAM, VPC, Security Groups | Infraestructura base Terraform |
+| Cognito User Pool, OAuth 2.0, PKCE | Auth service funcional en QA |
+| CI/CD: GitHub Actions + ECR + ECS | Pipeline de deploy a QA |
+| **Demo 1:** Cliente puede crear usuario e iniciar sesión en QA | ✅ |
+
+#### Sprint 2: Widget base + BFF (semana 3-4)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Widget Lit 3 con Custom Element, Shadow DOM | Widget embebible ~20KB |
+| API Gateway HTTP + Lambda@Edge (X-Cypher v1) | Cifrado funcional en QA |
+| BFF Service (FastAPI) con SSE streaming | BFF desplegado en QA |
+| **Demo 2:** Widget cargado en host de prueba, login + API cifrada | ✅ |
+
+#### Sprint 3: RAG simple + KB Admin v1 (semana 5-6)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Aurora Serverless v2 + pgvector | Vector DB operativa en QA |
+| Pipeline de ingesta: S3 → Step Functions → pgvector | Ingesta de documentos funcional |
+| KB Admin Panel v1 (subir documentos, ver estado) | Panel admin básico en QA |
+| **Demo 3:** Admin sube documento, se indexa en pgvector | ✅ |
+
+#### Sprint 4: Chat funcional + Ingesta (semana 7-8)
+
+| Actividad | Entregable |
+|-----------|------------|
+| RAG Service (LlamaIndex): chunking, embedding, retrieval | RAG v1 en QA |
+| Claude Sonnet en Bedrock + prompt engineering | Chat funcional con IA |
+| Widget conectado a RAG via BFF | Asistente responde preguntas en QA |
+| **Demo 4:** Asesor prueba el chat con documentos reales | ✅ |
+
+#### Sprint 5: Chat completo con cifrado (semana 9-10)
+
+| Actividad | Entregable |
+|-----------|------------|
+| X-Cypher extremo a extremo (cifrado payload + headers) | Cifrado completo en QA |
+| SSE streaming cifrado | Respuestas en tiempo real cifradas |
+| PII stripping antes de LLM | Privacidad de datos operativa |
+| Refinamiento de prompts + calidad respuestas | Chat listo para piloto |
+| **Demo 5:** Todo el flujo cifrado: widget → API → BFF → RAG → Bedrock → respuesta | ✅ |
+
+#### Sprint 6: Piloto 5-10 asesores (semana 11-12)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Despliegue a producción | Widget + backend en producción |
+| Onboarding 5-10 asesores reales | Asesores usando el sistema |
+| Monitoreo: CloudWatch, X-Ray, logs | Observabilidad operativa |
+| **Reunión alignment:** Feedback de asesores, ajustes priorizados | ✅ |
+
+#### Sprint 7: Ajustes post-piloto (semana 13-14)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Correcciones según feedback de asesores | V2 del asistente |
+| Mejoras de UX en widget | Widget refinado |
+| Ajustes de prompts y RAG basados en logs reales | RAG mejorado |
+| **Demo 7:** Versión mejorada del asistente en producción | ✅ |
+
+#### Sprint 8: Admin KB completo (semana 15-16)
+
+| Actividad | Entregable |
+|-----------|------------|
+| KB Admin Panel completo | Panel con todas las funcionalidades |
+| Chunk viewer, metadata editor, test queries | Admin puede gestionar documentos |
+| Pipeline de reindexación y versiones | Documentos actualizables sin downtime |
+| **Demo 8:** Admin gestiona toda la KB desde el panel | ✅ |
+
+#### Sprint 9: Cache + Performance (semana 17-18)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Redis Semantic Cache (umbral 0.92) | Cache operativo, ~68% menos llamadas a LLM |
+| Optimización de latencia (target: p95 < 2s) | Rendimiento optimizado |
+| Fargate auto-scaling + Savings Plans | Costos optimizados |
+| **Demo 9:** Rendimiento medido y documentado | ✅ |
+
+#### Sprint 10: Analytics + Seguridad (semana 19-20)
+
+| Actividad | Entregable |
+|-----------|------------|
+| Analytics Service + dashboard de métricas | Dashboard con uso, costos, satisfacción |
+| LangFuse + Grafana | Observabilidad completa |
+| Hardening de seguridad (WAF, rate limiting, audit) | Seguridad reforzada |
+| Documentación técnica + manuales | Documentación completa |
+| **Demo 10:** Sistema completo entregado, documentación final | ✅ |
+
+### 6.5 Ceremonias y Reuniones
+
+| Ceremonia | Frecuencia | Duración | Participantes |
+|-----------|-----------|----------|---------------|
+| **Sprint Review / Demo** | Cada 2 semanas | 1 hora | Cliente + Desarrollo |
+| **Sprint Planning** | Cada 2 semanas | 30-45 min | Cliente + Desarrollo |
+| **Daily sync** | 3 veces/semana | 15 min | Desarrollo (reporta avances) |
+| **Reunión de alineamiento** | Cada 4 semanas | 1 hora | Cliente + Desarrollo (roadmap, prioridades) |
+| **Retrospectiva** | Cada 4 semanas | 30 min | Desarrollo (mejora continua) |
+
+### 6.6 Piloto y Feedback Loop
+
+```
+Sprint 5: MVP funcional completo en QA
+    │
+    ▼
+Sprint 6: Despliegue a producción (5-10 asesores)
+    │
+    ▼
+Asesores usan el sistema (2 semanas)
+    │
+    ├─ Feedback recolectado vía:
+    │   • Encuesta integrada en el widget (satisfacción 1-5)
+    │   • Logs de conversaciones (con consentimiento)
+    │   • Entrevista con 2-3 asesores
+    │
+    ▼
+Sprint 7: Ajustes según feedback
+    │
+    ▼
+Sprint 8-10: Features adicionales + escalamiento
+```
 
 ---
 
@@ -900,6 +1108,17 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Lambda@Edge | 10K requests/mes | ~$0 | ~$0 (free tier) |
 | **Total MVP** | | **~$91/mes** | **~$314.000/mes** |
 
+#### QA / Staging (ambiente de pruebas — durante desarrollo y pilotos)
+
+| Servicio | Configuración | Costo/mes (USD) | Costo/mes (COP) |
+|----------|--------------|-----------------|------------------|
+| ECS Fargate | 1 servicio, 0.5 vCPU spot | ~$15 | ~$51.750 |
+| Aurora Serverless v2 | 0.5 ACU, 10 GB | ~$43 | ~$148.000 |
+| Bedrock (Claude Haiku) | 500 conversaciones/mes | ~$3 | ~$10.350 |
+| ElastiCache (Redis) | Serverless, 0.5 GB | ~$10 | ~$34.500 |
+| S3 + CloudFront | 5 GB, 10K requests | ~$3 | ~$10.350 |
+| **Total QA** | | **~$74/mes** | **~$255.000/mes** |
+
 #### Producción (100 asesores)
 
 | Servicio | Configuración | Costo/mes (USD) | Costo/mes (COP) |
@@ -911,12 +1130,14 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Bedrock (Claude Sonnet + Haiku) | 10K conversaciones/mes | ~$150 | ~$517.500 |
 | Titan Embeddings | 10K documentos/mes | ~$0.20 | ~$690 |
 | ElastiCache (Redis) | Serverless, 1 GB | ~$20 | ~$69.000 |
-| S3 + CloudFront | 10 GB, 50K requests | ~$5 | ~$17.250 |
-| Step Functions | Ingesta documentos | ~$5 | ~$17.250 |
+| S3 + CloudFront (widget + KB Admin) | 10 GB, 50K requests | ~$5 | ~$17.250 |
+| Step Functions | Ingesta documentos + pipeline KB | ~$5 | ~$17.250 |
 | CloudWatch + X-Ray | Logs + trazas | ~$20 | ~$69.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
 | Lambda@Edge | 50K requests/mes | ~$0.50 | ~$1.725 |
 | **Total Producción** | | **~$523/mes** | **~$1.804.000/mes** |
+| **+ QA (paralelo)** | | **~$74/mes** | **~$255.000/mes** |
+| **Total Prod + QA** | | **~$597/mes** | **~$2.059.000/mes** |
 
 #### Escalado (500+ asesores)
 
@@ -935,18 +1156,19 @@ Tasa de cambio: $1 USD = $3,450 COP
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
 | Lambda@Edge | 500K requests/mes | ~$5 | ~$17.250 |
 | **Total Escalado** | | **~$1.306/mes** | **~$4.506.000/mes** |
+| **+ QA (paralelo)** | | **~$74/mes** | **~$255.000/mes** |
+| **Total Esc + QA** | | **~$1.380/mes** | **~$4.761.000/mes** |
 
 ### 7.2 Proyección Anual (COP)
 
-| Mes | Fase | Costo/mes (USD) | Costo/mes (COP) | Acumulado (USD) | Acumulado (COP) |
-|-----|------|-----------------|------------------|-----------------|------------------|
-| 1-2 | Desarrollo + Fundación | ~$100 | ~$345.000 | $200 | ~$690.000 |
-| 3 | MVP | ~$200 | ~$690.000 | $600 | ~$2.070.000 |
-| 4-5 | Piloto (10 asesores) | ~$300 | ~$1.035.000 | $1.200 | ~$4.140.000 |
-| 6 | Piloto expandido (50) | ~$400 | ~$1.380.000 | $2.400 | ~$8.280.000 |
-| 7-8 | Producción (100) | ~$500 | ~$1.725.000 | $3.400 | ~$11.730.000 |
-| 9-12 | Escalamiento (200-500) | ~$800-1,300 | ~$2.760.000-4.485.000 | $7.700 | ~$26.565.000 |
-| **Total Año 1** | | | | **~$12.000-15.000/año** | **~$41.400.000-51.750.000/año** |
+| Mes | Fase | Costo AWS/mes (COP) |
+|-----|------|---------------------|
+| 1-2 | Desarrollo + Fundación (sprints 1-2, solo QA) | ~$345.000/mes |
+| 3-4 | MVP parcial (sprints 3-4, QA + prod parcial) | ~$800.000/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6, QA + prod) | ~$1.500.000/mes |
+| 7-10 | Producción 100 asesores (QA + prod) | ~$2.059.000/mes |
+| 11-12 | Escalamiento 200-500 (QA + prod) | ~$4.761.000/mes |
+| **Total Año 1** | **Proyección AWS** | **~$21.000.000-28.000.000/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1017,17 +1239,55 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 
 Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y el soporte continuo. El cliente paga una mensualidad que cubre costos de infraestructura + mantenimiento + soporte.
 
-#### 8.2.1 Inversión Inicial (Setup)
+> ⚠️ **Importante:** Como el sistema se construye desde cero, los primeros meses no hay ingresos por uso (no hay asesores usando el sistema). Necesitamos asegurar el flujo de caja desde el inicio para cubrir costos de AWS, dominios, desarrollo y operación.
+
+#### 8.2.1 Condiciones Contractuales
+
+| Aspecto | Término |
+|---------|---------|
+| **Duración mínima del contrato** | **12 meses** (para recuperar inversión inicial) |
+| **Facturación** | Mensual, anticipada (días 1 de cada mes) |
+| **Forma de pago** | Transferencia electrónica o débito |
+| **Penalización por cancelación anticipada** | Pago del 50% de los meses restantes del contrato |
+| **Incremento anual** | 10% sobre la mensualidad (ajuste IPC + mejora continua) |
+| **Medio de pago** | Factura electrónica con soporte IVA |
+
+#### 8.2.2 Flujo de Pagos — Mes a Mes
+
+| Mes | Concepto | Monto (COP) | Notas |
+|-----|----------|-------------|-------|
+| **Mes 0** | Setup + primera mensualidad | **$18.500.000** | Se paga **antes de empezar**. Cubre setup ($11M) + mes 1 ($7.5M) |
+| **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | Infraestructura QA operativa, primeras demos |
+| **Mes 2** | Mensualidad | **$7.500.000** | Desarrollo continúa (sprints 3-4) |
+| **Mes 3** | Mensualidad | **$7.500.000** | Sprint 5: MVP funcional en QA |
+| **Mes 4** | Mensualidad | **$7.500.000** | Sprint 6: Piloto 5-10 asesores en producción |
+| **Mes 5-12** | Mensualidad | **$7.500.000/mes** | Operación continua + mejoras incrementales |
+| **Total Año 1** | | **$101.000.000** | $18.5M (mes 0) + 11 × $7.5M |
+
+> **¿Por qué $18.5M upfront?** Para cubrir: setup de infraestructura AWS, dominios, certificados SSL, configuración inicial y primera mensualidad. Si el cliente cancela en el mes 1, al menos recuperamos los costos de setup + el primer mes de operación.
+
+#### 8.2.3 Qué Pasa Si el Cliente Cancela Antes de los 12 Meses
+
+| Cancelación en mes | Ya pagó (COP) | Penalización (COP) | Total recuperado (COP) |
+|-------------------|---------------|-------------------|------------------------|
+| Mes 1 | $18.500.000 | 50% × 11 meses × $7.5M = **$41.250.000** | **$59.750.000** |
+| Mes 3 | $33.500.000 | 50% × 9 meses × $7.5M = **$33.750.000** | **$67.250.000** |
+| Mes 6 | $56.000.000 | 50% × 6 meses × $7.5M = **$22.500.000** | **$78.500.000** |
+| Mes 12 | $101.000.000 | $0 (completó el contrato) | **$101.000.000** |
+
+#### 8.2.4 Inversión Inicial (Setup) — Incluido en el Mes 0
 
 | Concepto | Costo único (COP) |
 |----------|-------------------|
-| Implementación del widget en sitio del cliente | $4.000.000 |
-| Configuración de cuenta AWS + infraestructura base | $3.000.000 |
-| Onboarding + capacitación (2 sesiones) | $2.000.000 |
-| Personalización de tema/colores | $2.000.000 |
+| Creación de cuenta AWS, IAM, organización multi-cuenta | $3.000.000 |
+| Configuración de infraestructura base (VPC, subnets, Terraform) | $3.000.000 |
+| Registro de dominio + certificados SSL + CDN | $1.000.000 |
+| Implementación del widget en sitio del cliente | $2.000.000 |
+| Onboarding + capacitación inicial (2 sesiones) | $1.000.000 |
+| Personalización de tema/colores/marca | $1.000.000 |
 | **Total Setup** | **$11.000.000** |
 
-#### 8.2.2 Mensualidad por Plan
+#### 8.2.5 Mensualidad por Plan
 
 | Plan | Conversaciones/mes | Precio/mes (COP) | Ideal para |
 |------|-------------------|-------------------|------------|
@@ -1036,29 +1296,32 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | **Premium** | Hasta 5.000 | **$11.000.000** | Escalado, ~500 asesores |
 | **Ilimitado** | Sin límite | **$16.000.000** | Gran volumen |
 
-> **¿Qué incluye la mensualidad?** Infraestructura AWS, mantenimiento de microservicios, soporte técnico (horario laboral L-V 8am-6pm), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso.
+> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción + QA), mantenimiento de microservicios, soporte técnico (horario laboral L-V 8am-6pm), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel** (gestión de documentos), pipeline de ingesta de documentos.
 
-#### 8.2.3 Desglose de Costos del Plan Estándar
+#### 8.2.6 Desglose de Costos del Plan Estándar
 
 | Componente | Costo/mes (COP) |
 |------------|-----------------|
-| Infraestructura AWS (producción, 100 asesores) | ~$1.804.000 |
+| Infraestructura AWS (producción 100 ases + QA) | ~$2.059.000 |
+| Dominio + CDN + SSL/TLS | ~$100.000 |
 | Mantenimiento y soporte (~15 hrs/mes) | ~$2.250.000 |
 | Monitoreo + actualizaciones de seguridad | ~$500.000 |
-| **Subtotal costo** | **~$4.550.000** |
-| Margen de servicio (~39%) | ~$2.950.000 |
+| Gestión de KB Admin + pipeline de ingesta | ~$500.000 |
+| **Subtotal costo** | **~$5.409.000** |
+| Margen de servicio (~28%) | ~$2.091.000 |
 | **Precio al cliente** | **~$7.500.000** |
 
-#### 8.2.4 Excedentes y Penalizaciones
+#### 8.2.7 Excedentes y Penalizaciones
 
 | Concepto | Costo adicional |
 |----------|-----------------|
-| Conversación extra (sobre el límite del plan) | $800 COP por conversación |
-| Asesor adicional (sobre el límite del plan) | $35.000 COP/mes por asesor |
+| Conversación extra (sobre el límite del plan) | $1.000 COP por conversación |
+| Asesor adicional (sobre el límite del plan) | $50.000 COP/mes por asesor |
 | Soporte fuera de horario laboral (urgencias) | $120.000 COP/hr |
 | Personalización adicional de features | Cotización aparte |
+| Capacitación adicional | $250.000 COP/sesión |
 
-#### 8.2.5 SLA (Acuerdo de Nivel de Servicio)
+#### 8.2.8 SLA (Acuerdo de Nivel de Servicio)
 
 | Métrica | Compromiso |
 |---------|-----------|
@@ -1066,21 +1329,49 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | Tiempo de respuesta (p95) | < 2 segundos |
 | Tiempo de resolución de incidentes críticos | < 4 horas (horario laboral) |
 | Tiempo de resolución de incidentes menores | < 24 horas |
+| Frecuencia de backups | Diario automático |
+| Ventana de mantenimiento programado | Domingos 2am-4am |
 
-### 8.3 Recomendación
+#### 8.2.9 Entregables y Calendario de Pagos (Modelo B)
 
-Para Capillas de la Fe, se recomienda **Modelo B (Servicio Mensual)** por:
+| Sprint | Semana | Demo para el cliente | Pago |
+|--------|--------|---------------------|------|
+| **Setup** | 0 | — | **$18.500.000** (Mes 0) |
+| Sprint 1 | 1-2 | Infraestructura + Auth funcional en QA | — |
+| Sprint 2 | 3-4 | Widget + BFF + cifrado en QA | $7.500.000 (Mes 2) |
+| Sprint 3 | 5-6 | KB Admin v1 + RAG simple en QA | — |
+| Sprint 4 | 7-8 | Chat funcional con IA en QA | $7.500.000 (Mes 3) |
+| Sprint 5 | 9-10 | Chat completo cifrado + PII | — |
+| Sprint 6 | 11-12 | **Piloto en producción (5-10 asesores)** | $7.500.000 (Mes 4) |
+| Sprint 7 | 13-14 | Ajustes post-piloto | — |
+| Sprint 8 | 15-16 | KB Admin completo | $7.500.000 (Mes 5) |
+| Sprint 9 | 17-18 | Cache + performance | — |
+| Sprint 10 | 19-20 | Analytics + seguridad + documentación | $7.500.000 (Mes 6+) |
+
+### 8.3 Comparativa y Recomendación
+
+| Aspecto | Modelo A (Desarrollo) | Modelo B (Servicio) |
+|---------|----------------------|---------------------|
+| **Inversión inicial** | $48M (todo upfront) | $18.5M (setup + mes 1) |
+| **Costo mes 2-4** | $0 (solo desarrollo) | $7.5M/mes |
+| **Costo año 1 total** | ~$54M + AWS ~$6M = **~$60M** | **$101M** |
+| **Costo año 2+** | AWS: ~$12M + soporte externo: ~$108M = **~$120M/año** | **~$90M/año** ($7.5M × 12) |
+| **Soporte continuo** | ❌ No incluido | ✅ Incluido |
+| **Riesgo de cancelación** | Bajo (pago por hitos) | Mitigado (contrato 12 meses) |
+| **Quién opera AWS** | Cliente | Nosotros |
+| **KB Admin Panel** | ✅ Incluido en desarrollo | ✅ Incluido |
+| **Pipeline de ingesta** | ✅ Incluido | ✅ Incluido |
+
+**Recomendación:** Para Capillas de la Fe, se recomienda **Modelo B (Servicio Mensual)** por:
 
 1. **Sin riesgo de infraestructura**: El cliente no necesita expertise AWS ni preocuparse por facturas variables
 2. **Costo predecible**: Mensualidad fija sin sorpresas
 3. **Soporte continuo**: Actualizaciones, seguridad, monitoreo incluidos
 4. **Escalamiento transparente**: Cuando crezcan, nosotros ajustamos la infraestructura
-5. **Sin inversión inicial grande**: Setup de $11M contra $48M del Modelo A
+5. **Menor inversión inicial**: $18.5M vs $48M del Modelo A
+6. **Más económico a largo plazo**: Año 2+ = $90M/año vs ~$120M/año (AWS + contratar soporte)
 
-Costo primer año con Modelo B: $11.000.000 (setup) + (12 × $7.500.000) = **$101.000.000 COP**
-Costo primer año con Modelo A: $48.000.000 (desarrollo) + ~$6.000.000 (AWS año 1) = **~$54.000.000 COP** (pero sin soporte continuo ni mantenimiento)
-
-> El Modelo B es más caro porque incluye operación continua (soporte, mantenimiento, actualizaciones, monitoreo). El Modelo A requiere que el cliente contrate a alguien que opere la infraestructura (~$9M/mes adicionales = ~$108M/año), lo que hace que el Modelo B sea **más económico a largo plazo**.
+> 💡 **Consejo:** Si el cliente duda por el compromiso de 12 meses, se puede ofrecer un **periodo de prueba de 3 meses** con contrato mensual a precio Estándar ($7.5M/mes + setup $11M = $18.5M mes 1, luego $7.5M/mes). Si a los 3 meses quieren continuar, firman el contrato anual. Si no, cada quien sigue su camino — nosotros recuperamos los costos de desarrollo + AWS.
 
 ---
 
@@ -1146,6 +1437,6 @@ Costo primer año con Modelo A: $48.000.000 (desarrollo) + ~$6.000.000 (AWS año
 
 ---
 
-*Documento generado con asistencia de IA agentic. Versión 2.0 — Junio 2026.*
+*Documento generado con asistencia de IA agentic. Versión 1 — Junio 2026.*
 
 *Para preguntas o ajustes: equipo de desarrollo.*

@@ -32,14 +32,14 @@ El sistema tiene **dos partes que se ven**, y **una que no se ve**:
 - Todo viaja cifrado (como un banco)
 - El sistema aprende y mejora con el uso
 
-### ¿Cómo se instala?
+### Dos formas de implementar
 
-```
-El cliente (Capillas de la Fe) no instala nada.
-Solo agrega una línea a su sistema actual.
-El widget aparece flotando en la pantalla.
-Listo. No hay más.
-```
+| Opción | Ideal para | ¿Qué necesita el cliente? |
+|--------|-----------|--------------------------|
+| **Opción 1 — Inicio rápido** | Empezar en semanas | Importar un script CDN y llamar una función |
+| **Opción 2 — Corporativa** | Política corporativa de identidad | Integración con SSO (Active Directory / Azure AD) |
+
+En la **Opción 1**, el cliente importa un script (como Google Analytics) y llama una función con los datos del usuario. El widget aparece flotando en la pantalla. En la **Opción 2**, el widget se integra con el inicio de sesión corporativo del cliente.
 
 ---
 
@@ -92,6 +92,17 @@ flowchart TB
 | **Bedrock (Claude)** | La inteligencia artificial | El experto que redacta la respuesta final |
 
 > **Clave:** Todos los servicios se comunican dentro de una red privada. Nada queda expuesto a internet.
+
+### Dos modalidades de despliegue
+
+| Aspecto | Opción 1 — Inicio rápido | Opción 2 — Corporativa |
+|---------|-------------------------|-----------------------|
+| **¿Quién autentica?** | Handshake RSA + AES (el frontend negocia la clave con el orquestador) | Cognito + SSO corporativo |
+| **Cifrado** | AES-256-GCM entre frontend y orquestador | AES-256-GCM + JWT de Cognito |
+| **Tiempo de implementación** | ~1 semana | ~3-4 semanas |
+| **Costo adicional** | $0 | $0 (Cognito gratis hasta 10K usuarios) |
+
+> **Nota:** Ambos modos comparten la misma arquitectura de fondo (servicios, base de datos, IA). Solo cambia cómo se autentica el asesor y cómo viaja el cifrado.
 
 ---
 
@@ -286,6 +297,8 @@ flowchart LR
 | ¿Costo si crecemos? | ~$19 COP por usuario extra | ~$114 COP por usuario extra | ~$19 COP por usuario extra |
 | **Costo mes para 100 asesores** | **$0 COP** | **$0 COP** | **$0 COP** |
 
+> **Nota:** Cognito (y esta comparativa) aplica solo para la **Opción 2 (Corporativa)**. En la **Opción 1 (Inicio rápido)** no se necesita sistema de autenticación externo — el handshake RSA+AES es suficiente. En ambos casos el costo es $0.
+
 ### Componente 2: Puerta de entrada (API)
 
 | Aspecto | AWS (API Gateway) | Azure (API Management) | GCP (Cloud Load Balancer) |
@@ -475,7 +488,7 @@ flowchart LR
 | **Bedrock (Claude)** | La inteligencia artificial que entiende y responde preguntas | Por cantidad de texto que recibe (input) y genera (output) | ~10.000 conversaciones por mes entre 100 asesores | **~$517.500** |
 | **API Gateway HTTP** | La puerta de entrada que valida cada llamada | Por cada llamada que recibe | ~500.000 llamadas al mes (entre consultas, login, subida de docs) | **~$1.725** |
 | **ElastiCache (Redis)** | Memoria que guarda respuestas repetidas para no gastar en IA cada vez | Por capacidad de memoria reservada | 1 GB de memoria — suficiente para miles de respuestas guardadas | **~$69.000** |
-| **Cognito** | Sistema de inicio de sesión para asesores y administradores | Por usuario activo por mes | 100 asesores — los primeros 10.000 son gratis | **$0** |
+| **Cognito** | Sistema de inicio de sesión (solo Opción 2 — Corporativa) | Por usuario activo por mes | 100 asesores — los primeros 10.000 son gratis | **$0** |
 | **S3 + CloudFront** | Almacén de archivos (widgets, documentos) + red de distribución | Por GB almacenado + GB transferido | 10 GB de documentos, 50.000 descargas del widget al mes | **~$17.250** |
 | **Step Functions** | Orquestación automática cuando se sube un documento | Por paso ejecutado en el flujo | Ingresan documentos nuevas cada semana | **~$17.250** |
 | **CloudWatch + X-Ray** | Registro de todo lo que pasa: errores, tiempos, uso | Por volumen de datos de log y trazas | Logs de todos los servicios, 24/7 | **~$69.000** |
@@ -630,7 +643,7 @@ sequenceDiagram
 
     Note over W,S: MODO CIFRADO (X-Cypher Enabled: true)
 
-    W->>W: Deriva clave de cifrado<br/>desde el token de sesión
+    W->>W: Obtiene clave de cifrado<br/>(handshake RSA o Cognito)
     W->>W: Cifra el mensaje con AES-256-GCM<br/>(★ mismo estándar que usan los bancos ★)
     W->>I: Body cifrado + headers cifrados
     I->>E: Llega a CloudFront
@@ -698,7 +711,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph SISTEMA[EL SISTEMA EN UNA MIRADA]
-        L1["💬 Chat + 📋 Panel Admin<br/>2 widgets que se instalan con una línea"]
+        L1["💬 Chat + 📋 Panel Admin<br/>2 opciones de instalación"]
         L2["⚡ Responde en ~2 segundos<br/>Cache: < 0.5 segundos"]
         L3["🔒 Cifrado bancario (AES-256-GCM)<br/>+ Cumplimiento Ley 1581"]
         L4["🧠 Claude Sonnet (Anthropic)<br/>Mejor IA en español para el sector funerario"]
@@ -709,7 +722,7 @@ flowchart TB
 | Concepto | Respuesta |
 |----------|-----------|
 | **¿Qué es?** | Un asistente que los asesores usan desde un chat flotante |
-| **¿Cómo se instala?** | Agregando una línea al sistema actual — sin cambio de software |
+| **¿Cómo se instala?** | Opción 1: importar un script CDN. Opción 2: SSO corporativo. Sin cambio de software |
 | **¿Qué tecnología usa?** | Amazon Web Services (AWS), región Sao Paulo |
 | **¿Qué tan rápido responde?** | ~2 segundos el 95% de las veces. Si es pregunta repetida, < 0.5 segundos |
 | **¿Es seguro?** | Cifrado bancario (AES-256-GCM) + Cumplimiento Ley 1581 de Protección de Datos |

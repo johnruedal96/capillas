@@ -60,31 +60,50 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 
 ## 2. Arquitectura del Sistema
 
-### 2.1 Diagrama de Componentes (Nivel 1)
+### 2.1 Modalidades de Despliegue
+
+El sistema soporta **dos modalidades de despliegue** según la infraestructura que tenga Capillas de la Fe:
+
+| Aspecto | Opción 1 — Widget solo | Opción 2 — App completa |
+|---------|----------------------|------------------------|
+| **¿Quién provee la app anfitriona?** | Capillas de la Fe (su app existente: WordPress, React, etc.) | Nosotros creamos una app SPA minimalista |
+| **¿Quién maneja el login?** | Capillas de la Fe (su propio sistema de auth existente) | Nosotros (Cognito + OAuth 2.0) |
+| **¿Cómo recibe el token el widget?** | Frontend usa SDK Capillas (CDN). SDK hace handshake RSA con BFF → recibe JWT → lo pasa al widget vía atributo `token` | Flujo OAuth 2.0 + PKCE manejado por el widget |
+| **Widget muestra login UI** | ❌ No — el frontend obtiene token via SDK sin intervención del usuario | ✅ Sí — el widget abre ventana OAuth |
+| **Cognito necesario** | ❌ No (nosotros emitimos JWT firmado con nuestro secreto) | ✅ Sí |
+| **Complejidad de integración** | Baja — solo agregar `<script>` y pasar token | Media — requiere configurar Cognito + flujo OAuth |
+| **Ideal para** | Capillas ya tiene app con login propio | Capillas NO tiene app o quiere login gestionado |
 
 ```mermaid
 graph TB
-    HostApp[App Anfitriona WordPress React etc]
-    CDN[CloudFront CDN Widget estatico]
-    WIDGET[Widget Lit 3 Custom Element Shadow DOM]
-    GW[API Gateway HTTP Rate limit JWT X-Cypher]
-    BFF[BFF Service FastAPI SSE]
-    AUTH[Cognito OAuth 2.0]
-    ANALYTICS[Analytics Service Metricas Logs]
-    RAG[RAG Service LlamaIndex]
-    AURORA[Aurora pgvector Vectores SQL]
-    REDIS[Redis Cache Cache y Sesiones]
-    BEDROCK[Bedrock Claude y Titan]
-    KMS[AWS KMS Cifrado]
-    KBADMIN[KB Admin Widget<br/>Lit 3 gestion docs]
+    subgraph LEGEND[Leyenda]
+        OPT1[Opción 1: Widget solo<br/>El host ya tiene login propio]
+        OPT2[Opción 2: App completa<br/>Nosotros creamos app + login]
+    end
 
-    HostApp -->|script tag| CDN
-    HostApp -->|HTTPS| KBADMIN
-    HostApp -->|HTTPS| WIDGET
+    subgraph AWS["AMAZON WEB SERVICES"]
+        GW[API Gateway HTTP]
+        BFF[BFF Service FastAPI]
+        AUTH[Amazon Cognito<br/>Solo en Opción 2]
+        ANALYTICS[Analytics Service]
+        RAG[RAG Service LlamaIndex]
+        AURORA[Aurora pgvector]
+        REDIS[Redis Cache]
+        BEDROCK[Bedrock Claude]
+        KMS[AWS KMS]
+        S3[(Amazon S3)]
+        STEP[Step Functions]
+        CF[CloudFront CDN]
+    end
+
+    WIDGET[Widget Lit 3<br/>Chat + KB Admin]
+    HOST[App Anfitriona<br/>Opción 1: App existente del cliente<br/>Opción 2: App SPA creada por nosotros]
+
+    HOST -->|Carga widget desde CDN| CF
+    HOST -->|Opción 1: SDK handshake RSA<br/>→ recibe JWT → atributo token| WIDGET
+    HOST -->|Opción 2: incluye login Cognito| AUTH
     WIDGET -->|POST cifrado| GW
-    KBADMIN -->|POST cifrado| GW
     GW -->|HTTP| BFF
-    GW -->|OAuth| AUTH
     GW -->|Async| ANALYTICS
     BFF -->|gRPC mTLS| RAG
     BFF -->|SQS| ANALYTICS
@@ -93,8 +112,8 @@ graph TB
     RAG -->|Bedrock API| BEDROCK
     KMS -.->|Encripta| AURORA
     KMS -.->|Encripta| REDIS
-    KBADMIN -->|Sube docs cifrados| S3[Amazon S3 Documentos fuente]
-    S3 -->|Evento| STEP[Step Functions<br/>Pipeline ingesta]
+    KBADMIN[KB Admin Widget<br/>Panel de gestión documentos] -->|Sube docs cifrados| S3
+    S3 -->|Evento| STEP
     STEP -->|Procesa| RAG
 ```
 
@@ -135,21 +154,69 @@ sequenceDiagram
     W-->>A: Plan Familiar Premium
 ```
 
-### 2.3 Flujo de Autenticación OAuth 2.0 + PKCE + BFF
+> **Nota:** "Cache HIT" significa que la respuesta ya estaba guardada en caché (se entrega inmediatamente sin costo de IA). "Cache MISS" significa que no estaba guardada y hay que calcularla completa.
+
+### 2.3 Flujo de Autenticación
+
+#### Opción 1 — Auth delegada al Host (Capillas maneja login)
+
+Cuando Capillas ya tiene su propio sistema de autenticación, el frontend del cliente obtiene un token de sesión mediante un **handshake cifrado** con nuestro backend. El cliente no escribe crypto — solo importa nuestro script CDN y llama a una función.
 
 ```mermaid
 sequenceDiagram
-    participant Host as Host App
+    participant Front as Frontend Cliente
+    participant SDK as SDK Capillas (CDN)
+    participant BFF as BFF Service
+
+    Note over Front: Usuario ya autenticado<br/>en sistema del cliente
+    Front->>SDK: CapillasAuth.exchange({<br/>  userId, email, name<br/>})
+    SDK-->>BFF: GET /.well-known/public-key
+    BFF-->>SDK: { publicKey: JWK }
+    SDK->>SDK: Genera AES key + nonce<br/>Cifra payload con RSA-OAEP<br/>payload = { userId, email, name,<br/>  client_key, client_nonce,<br/>  timestamp, nonce_rsa }
+    SDK->>BFF: POST /auth/handshake<br/>Body: base64(ciphertext_rsa)
+    BFF->>BFF: Descifra con RSA priv key<br/>Valida nonce + timestamp<br/>Genera JWT de sesión
+    BFF->>SDK: Body: base64(ciphertext_aes)<br/>cifrado con client_key del front
+    SDK->>SDK: Descifra con AES key<br/>→ obtiene session_token
+    SDK-->>Front: Retorna session_token
+    Front->>Widget: <chat-widget token="eyJ...">
+    Widget->>Widget: Deriva session key (PBKDF2)<br/>para X-Cypher
+```
+
+El cliente solo necesita importar nuestro SDK (alojado en CDN) y llamar a una función con los datos del usuario que ya tiene por su login (ID, nombre, email). El SDK internamente:
+
+1. Obtiene la llave RSA pública de nuestro backend desde un endpoint público
+2. Genera una clave AES-256 temporal y un número aleatorio de un solo uso (nonce)
+3. Cifra los datos del usuario junto con la clave AES y el nonce usando RSA
+4. Envía todo a nuestro backend (`POST /auth/handshake`)
+5. Nuestro backend descifra con su llave privada, valida que el nonce no se haya usado antes (anti-replay), y genera un JWT de sesión con vigencia de 15 minutos
+6. Devuelve el JWT cifrado con la clave AES que el SDK generó
+7. El SDK descifra la respuesta y entrega el token al cliente
+
+**Seguridad del handshake:**
+- RSA cifra todo el payload → nadie en el medio puede leer los datos del usuario ni la clave AES
+- La clave AES vive solo en memoria RAM del navegador y no se puede exportar ni leer desde la consola
+- El nonce + timestamp evita que un atacante re-envíe una solicitud interceptada (replay attack)
+- CORS restringido al dominio del cliente bloquea handshakes desde sitios externos
+- El token final es un JWT firmado por nosotros → nuestro backend lo valida sin depender de sistemas externos
+- Todos los requests posteriores del widget van cifrados con AES-256-GCM, el token nunca viaja en texto plano
+
+#### Opción 2 — Auth gestionada (Nosotros manejamos login y app)
+
+Cuando Capillas no tiene app ni login, construimos una app SPA con Cognito + OAuth 2.0 + PKCE:
+
+```mermaid
+sequenceDiagram
+    participant App as App SPA (Nosotros)
     participant Widget as Widget
     participant Popup as Ventana OAuth
-    participant Cognito as Cognito
+    participant Cognito as Amazon Cognito
     participant BFF as BFF Service
     participant GW as API Gateway
 
-    Host->>Widget: Carga widget
-    Widget->>Widget: Detectar no autenticado
-    Asesor->>Widget: Click Iniciar Sesion
-    Widget->>Popup: window.open con PKCE
+    App->>Widget: Carga widget
+    Widget->>App: Emite evento @capillas:needs-auth
+    App->>App: Abre ventana OAuth
+    App->>Popup: window.open con PKCE
     Popup->>Cognito: Auth Request
     Cognito-->>Popup: Login form
     Asesor->>Popup: Credenciales
@@ -159,8 +226,9 @@ sequenceDiagram
     BFF->>Cognito: Token Request code
     Cognito-->>BFF: Tokens AT RT ID
     BFF->>BFF: Set HttpOnly cookie RT
-    BFF-->>Popup: Access Token cifrado
-    Popup-->>Widget: postMessage access_token
+    BFF-->>Popup: Access Token
+    Popup-->>App: postMessage access_token
+    App->>Widget: Pasa token al widget
     Widget->>Widget: Almacenar AT in-memory
     Widget->>GW: API Call con cifrado
 ```
@@ -202,16 +270,7 @@ El widget se construye con **Lit 3** como Web Component nativo, empaquetado como
 
 #### 3.1.2 Instalación
 
-```html
-<!-- Único requisito: agregar script y custom element -->
-<script src="https://cdn.capillas.ai/widget/v1/widget.js" defer></script>
-<mi-widget 
-  api-key="live_abc123_def456" 
-  theme="light" 
-  position="bottom-right"
-  lang="es">
-</mi-widget>
-```
+El widget se instala agregando un `<script>` tag y un custom element en el HTML del host. Se configura mediante atributos HTML como `api-key`, `theme`, `position` e `idioma`. No requiere frameworks, bundlers ni dependencias adicionales.
 
 #### 3.1.3 Stack del Widget
 
@@ -226,87 +285,32 @@ El widget se construye con **Lit 3** como Web Component nativo, empaquetado como
 
 #### 3.1.4 Flujo de Comunicación con el Host
 
-```
-Host App → Widget:
-  widgetElement.config = { theme: 'dark', user: { id: '123' } }
-  window.postMessage({ type: '@capillas:config', payload: {...} }, '*')
+El widget expone una API de comunicación bidireccional que soporta los dos modos de despliegue:
 
-Widget → Host App:
-  window.parent.postMessage({ type: '@capillas:event', 
-    payload: { event: 'login', user: 'asesor_456' } }, parentOrigin)
-```
+**Opción 1 — Widget solo (host maneja auth):** El host importa nuestro SDK de autenticación (CDN) y llama a una función con los datos del usuario. El SDK hace el handshake RSA con el BFF, recibe el JWT y lo retorna. El host pasa ese token al widget mediante atributo HTML, propiedad JS o postMessage.
+
+**Opción 2 — App completa (nosotros manejamos auth):** La app SPA que nosotros construimos maneja el flujo OAuth con Cognito. Obtiene el token mediante el flujo estándar (authorization code + PKCE) y se lo pasa al widget.
+
+**Comunicación host ↔ widget:**
+La comunicación entre el host y el widget es bidireccional. El host puede pasar el token al widget mediante atributo HTML, propiedad JavaScript o postMessage. El widget notifica al host cuando el token está por expirar mediante eventos DOM o postMessage.
 
 #### 3.1.5 Manejo de Tokens en el Widget
 
-| Token | Duración | Almacenamiento | Propósito |
-|-------|----------|----------------|-----------|
-| Access Token (JWT) | 15 minutos | Variable in-memory (JS) | API calls |
-| Refresh Token | 30 días | HttpOnly + Secure + SameSite=Strict cookie | Refrescar AT |
-| ID Token (JWT) | 1 hora | Variable in-memory | Perfil de usuario |
-| Session Key (X-Cypher) | TTL = 24h | Variable in-memory (JS, derivada de AT) | Cifrado payload |
+El manejo de tokens difiere según la opción de despliegue. En ambos modos, el widget **nunca** almacena tokens en localStorage o sessionStorage — solo en memoria volátil.
 
-#### 3.1.6 Cifrado en el Widget — X-Cypher Client
+**Opción 1 (Widget solo):** El host obtiene el token mediante el handshake RSA (ver sección 2.3). El token es un JWT firmado por nuestro backend con vigencia de 15 minutos. Cuando expira, el host repite el handshake para obtener uno nuevo.
 
-```typescript
-// Ejemplo conceptual (TypeScript)
-class CypherClient {
-  private sessionKey: CryptoKey;
+**Opción 2 (App completa):** La app SPA maneja el flujo OAuth con Cognito. Se utilizan tres tipos de token: Access Token (JWT, 15 min, en memoria para API calls), Refresh Token (30 días, en cookie segura HttpOnly para renovar), e ID Token (1 hora, en memoria para perfil de usuario).
 
-  async init(accessToken: string) {
-    // Deriva la clave de sesión del access token + salt
-    const salt = new TextEncoder().encode('capillas-xcypher-v1');
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw', new TextEncoder().encode(accessToken),
-      'PBKDF2', false, ['deriveKey']
-    );
-    this.sessionKey = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-      keyMaterial, { name: 'AES-GCM', length: 256 },
-      false, ['encrypt', 'decrypt']
-    );
-  }
+#### 3.1.6 Cifrado en el Widget — X-Cypher
 
-  async encrypt(payload: Record<string, unknown>, headers: Record<string, string>) {
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const plaintext = new TextEncoder().encode(JSON.stringify(payload));
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv }, this.sessionKey, plaintext
-    );
-    const encryptedHeaders = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: crypto.getRandomValues(new Uint8Array(12)) },
-      this.sessionKey, new TextEncoder().encode(JSON.stringify(headers))
-    );
-    return {
-      body: btoa(String.fromCharCode(...new Uint8Array(encrypted))),
-      iv: btoa(String.fromCharCode(...iv)),
-      headersCipher: btoa(String.fromCharCode(...new Uint8Array(encryptedHeaders))),
-    };
-  }
-
-  async decrypt(ciphertext: string, ivB64: string): Promise<unknown> {
-    const iv = Uint8Array.from(atob(ivB64), c => c.charCodeAt(0));
-    const data = Uint8Array.from(atob(ciphertext), c => c.charCodeAt(0));
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv }, this.sessionKey, data
-    );
-    return JSON.parse(new TextDecoder().decode(decrypted));
-  }
-}
-```
+El widget implementa cifrado extremo a extremo. Cada request se cifra con AES-256-GCM utilizando una clave de sesión derivada del JWT y una clave aleatoria generada durante el handshake. Los headers también se cifran, de modo que un atacante solo ve contenido ilegible en tránsito.
 
 #### 3.1.7 Widget de Administración de Knowledge Base (KB Admin Widget)
 
 Al igual que el widget de chat, el panel de administración de la base de conocimiento se construye como un **Lit 3 Custom Element empaquetado como IIFE**, con la misma arquitectura de cifrado X-Cypher. Esto permite **reutilizarlo en cualquier cliente** con un simple `<script>` tag, sin importar el framework del host. Los asesores NUNCA ven este panel — solo los administradores lo usan para gestionar documentos.
 
-**Instalación:**
-```html
-<script src="https://cdn.capillas.ai/admin/v1/kb-admin.js" defer></script>
-<mi-kb-admin 
-  api-key="live_abc123_def456"
-  mode="full"
-  lang="es">
-</mi-kb-admin>
-```
+Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y un custom element, con atributos de configuración.
 
 **Funcionalidades:**
 
@@ -326,49 +330,15 @@ Al igual que el widget de chat, el panel de administración de la base de conoci
 |------------|-----------|-------|
 | Framework | Lit 3 | Mismo que el widget de chat |
 | Build | Vite IIFE | Mismo bundle, mismo formato |
-| Autenticación | Cognito (rol admin) | Mismo user pool, distinto rol |
+| Autenticación | Opción 1: token del host<br/>Opción 2: Cognito (rol admin) | Depende del modo de despliegue |
 | Cifrado | X-Cypher (AES-256-GCM) | **Misma estrategia que el chat** — nada viaja en texto plano |
 | Hosting | S3 + CloudFront | Mismo CDN, ruta `/admin/` |
 | API | Knowledge Base Service (FastAPI) | Endpoints protegidos con X-Cypher |
 | Pipeline ingesta | S3 → Step Functions → Lambda → pgvector | Automático |
 
-**Flujo de comunicación cifrada (idéntico al widget de chat):**
-```
-KB Admin Widget                          API Gateway + Lambda@Edge
-    │                                           │
-    │  POST /api/kb/upload                      │
-    │  Body: ciphertext (AES-256-GCM)           │
-    │  X-Cypher-Headers: {Authorization, ...}   │
-    │  X-Cypher-Enabled: true                   │
-    │──────────────────────────────────────────▶│
-    │                                           │→ Descifra → KB Service
-    │  Response: ciphertext                     │← Cifra ←
-    │◀──────────────────────────────────────────│
-    │
-    │  (Si B2B: X-Cypher-Enabled: false → JSON plano)
-```
+**Flujo de comunicación cifrada (idéntico al widget de chat):** El KB Admin Widget envía requests cifrados con AES-256-GCM al API Gateway. Lambda@Edge descifra el payload y los headers, reconstruye el request y lo pasa al Knowledge Base Service. La respuesta viaja de vuelta cifrada. Para comunicación interna entre servicios, se desactiva el cifrado con una bandera y viaja en JSON plano.
 
-**Flujo de ingesta de documentos:**
-
-```
-KB Admin Panel (admin)
-    │ Sube PDF/DOCX/MD
-    ▼
-API Gateway → BFF → Knowledge Base Service
-    │ Guarda archivo en S3 (bucket raw/)
-    ▼
-S3 Event Notification
-    │
-    ▼
-Step Functions
-    │ 1. Lambda parser (extrae texto, imágenes)
-    │ 2. Lambda chunker (divide en fragmentos, solapamiento 10%)
-    │ 3. Extrae metadatos (categoría, tags, fecha)
-    │ 4. Genera embeddings con Titan Embeddings V2
-    │ 5. Almacena en Aurora pgvector (HNSW index)
-    ▼
-Notificar al panel: "Documento indexado correctamente"
-```
+**Flujo de ingesta de documentos:** El administrador sube un archivo, el servicio lo guarda en S3 y dispara un flujo automático en Step Functions. Este flujo ejecuta en secuencia: extracción de texto, división en fragmentos, extracción de metadatos, generación de vectores (embeddings) y almacenamiento en la base de datos vectorial.
 
 ### 3.2 Backend — Microservicios
 
@@ -399,32 +369,11 @@ Notificar al panel: "Documento indexado correctamente"
 
 #### 3.2.3 Pipeline RAG (Detalle)
 
-```
-INGESTA (Offline / Batch)
-  Documentos (PDF, DOCX, MD) 
-    → S3 Bucket 
-    → S3 Event Notification 
-    → Step Functions 
-    → Lambda (parse + chunk + metadata extraction)
-    → Titan Embeddings V2 (512d) 
-    → Aurora pgvector (HNSW index)
+El pipeline RAG tiene dos flujos:
 
-QUERY (Online / Tiempo Real)
-  Query asesor 
-    → Query Rewrite (corrección ortográfica, expansión)
-    → Semantic Cache (Redis, umbral 0.92)
-      → [HIT] → Respuesta cacheada
-      → [MISS] → 
-    → Hybrid Search (BM25 + vector + metadata filters)
-    → Cross-encoder Reranker (top 50 → top 5)
-    → Parent-child expansion (chunks pequeños → contexto padre)
-    → Context Assembly (< 4K tokens)
-    → Prompt Engineering (system + context + query)
-    → Claude Sonnet 4.6 (Bedrock)
-    → Streaming response (SSE)
-    → Store in semantic cache
-    → Log to Analytics
-```
+**Ingesta (offline/batch):** Los documentos pasan por S3 → Step Functions → Lambda que extrae texto, divide en fragmentos y extrae metadatos. Luego se generan vectores (embeddings) con Titan Embeddings V2 y se almacenan en Aurora pgvector con índice HNSW para búsqueda rápida.
+
+**Consulta (online/tiempo real):** La consulta del asesor pasa por reescritura (corrección ortográfica y expansión), revisa el caché semántico en Redis, y si no encuentra respuesta (cache MISS) ejecuta búsqueda híbrida (BM25 + vectores + filtros), reordenamiento con cross-encoder, expansión padre-hijo, ensamblaje de contexto, y finalmente invoca Claude Sonnet para generar la respuesta vía streaming.
 
 #### 3.2.4 Model Routing — Clasificador de Complejidad de Consulta
 
@@ -465,74 +414,11 @@ Se ejecuta antes de cualquier llamada a Bedrock. Usa expresiones regulares y pat
 | Ayuda explícita | `^(ayuda\|help\|qué puedes hacer\|qué haces)` | "Ayuda", "¿Qué puedes hacer?" |
 | Repetición | `^(repite\|otra vez\|no entendí\|no escuché)` | "Repite por favor" |
 
-**Implementación del clasificador (RAG Service):**
+**Clasificación por reglas (Nivel 1):** Sin costo de IA. Usa patrones de texto para identificar consultas simples (saludos, horarios, agradecimientos) y complejas (comparaciones, recomendaciones, objeciones). Si las reglas no pueden clasificar, pasa al Nivel 2.
 
-```python
-# Nivel 1: Heurísticas (0 tokens, 0ms overhead)
-async def rule_based_classifier(query: str) -> Complexity | None:
-    patterns = {
-        Complexity.SIMPLE: [
-            r"^(hola|buenos|buenas|hey|saludos)[\s\p{P}]?",
-            r"^(gracias|chao|bye|adiós|nos\s+vemos)[\s\p{P}]?",
-            r"^(sí|no|ok|dale|listo|claro)[\s\p{P}]?$",
-            r"^(ayuda|help|qué\s+puedes)",
-            r"^(repite|otra\s+vez|no\s+entendí)",
-        ],
-        Complexity.COMPLEX: [
-            r"compar(a|e)", r"recomiend(a|e)", r"mejor\s+(opción|plan)",
-            r"diferencia", r"cuál\s+(me|le)", r"cliente\s+dice",
-        ],
-    }
-    for complexity, regexes in patterns.items():
-        if any(re.search(p, query.strip().lower()) for p in regexes):
-            return complexity
-    return None  # Pasa a Nivel 2
-```
+**Clasificador Haiku (Nivel 2):** Solo cuando las reglas no deciden. Se invoca Claude Haiku con un prompt especializado que clasifica la consulta como simple o compleja, y si es simple, también genera la respuesta en la misma llamada. Esto evita una segunda invocación al modelo más caro.
 
-**Nivel 2 — Clasificador Haiku (bajo costo):**
-
-Si las reglas no deciden, se invoca Haiku con un prompt especializado para clasificar la consulta. Una sola llamada Haiku clasifica + responde si la consulta es simple:
-
-```python
-# Nivel 2: Clasificación + respuesta con Haiku
-async def classify_with_haiku(query: str) -> tuple[Complexity, str]:
-    prompt = f"""Eres un clasificador de consultas para un asistente de ventas funerarias.
-
-Consulta: "{query}"
-
-Clasifica si esta consulta es SIMPLE o COMPLEJA:
-
-SIMPLE = saludos, horarios, agradecimientos, confirmaciones,
-         preguntas de una palabra, ayuda general, repeticiones
-
-COMPLEJA = recomendaciones de planes, manejo de objeciones,
-           comparación de productos, análisis de perfil de cliente,
-           preguntas sobre coberturas, situación emocional del cliente
-
-Responde SOLO con una línea JSON:
-{{"complejidad": "SIMPLE"|"COMPLEJA", "confianza": 0.0-1.0,
-  "respuesta": "respuesta directa si es SIMPLE, o vácia si es COMPLEJA"}}"""
-
-    response = await bedrock.invoke_haiku(prompt)
-    return parse_response(response)
-```
-
-**Flujo completo de decisión:**
-
-```
-Cache MISS
-  │
-  ▼
-Nivel 1 (Reglas)
-  │
-  ├─ Simple → Haiku (responde directo con llamada barata)
-  │
-  └─ No clasificó → Nivel 2 (Haiku clasificador)
-       │
-       ├─ Simple (confianza > 0.8) → Haiku responde
-       │
-       └─ Compleja (o confianza ≤ 0.8) → Sonnet responde
-```
+**Flujo completo de decisión:** El proceso sigue el diagrama anterior: Cache Miss → Nivel 1 (reglas heurísticas sin costo) → si clasifica como simple, responde Haiku; si no clasifica, pasa al Nivel 2 (Haiku clasificador) → si clasifica como simple con alta confianza responde Haiku; si es compleja responde Sonnet.
 
 **Ahorro estimado:**
 
@@ -558,34 +444,7 @@ Nivel 1 (Reglas)
 | **Override manual** | El system prompt de Sonnet puede detectar inconsistencias y forzar re-consulta si detecta que la respuesta Haiku fue insuficiente |
 | **Fallback por longitud** | Consultas con más de 150 tokens se envían directamente a Sonnet sin clasificar (asumimos que son complejas por su extensión) |
 
-**Actualización del pipeline RAG con routing:**
-
-```
-QUERY (Online / Tiempo Real)
-  Query asesor 
-    → Query Rewrite
-    → Semantic Cache (Redis, umbral 0.92)
-      → [HIT] → Respuesta cacheada ($0)
-      → [MISS] → 
-    → Model Routing:
-      → Nivel 1 (Reglas heurísticas)
-        → Simple → Haiku responde (~$35)
-        → No clasifica → Nivel 2 (Haiku clasificador)
-          → Simple → Haiku responde (~$35)
-          → Compleja → Hay más abajo
-    → [Ruta Compleja ↓]
-    → Hybrid Search (BM25 + vector + metadata filters)
-    → Cross-encoder Reranker (top 50 → top 5)
-    → Parent-child expansion
-    → Context Assembly (< 4K tokens)
-    → Prompt Engineering
-    → Claude Sonnet 4.6 (Bedrock) (~$100)
-    → Streaming response (SSE)
-    → Store in semantic cache
-    → Log to Analytics (incluye decisión de routing)
-```
-
-**Nota:** El routing ocurre **antes** de la búsqueda vectorial. Si la consulta es simple (saludo), no tiene sentido ejecutar Hybrid Search, Reranker, etc. Eso también ahorra cómputo y latencia en el pipeline. Solo las consultas clasificadas como complejas pasan por retrieval completo.
+**Actualización del pipeline RAG con routing:** El modelo de routing se ejecuta **antes** de la búsqueda vectorial. Si la consulta es simple (saludo, horario), responde directamente con Haiku sin ejecutar Hybrid Search, Reranker ni ningún otro paso costoso. Solo las consultas clasificadas como complejas pasan por el pipeline completo de retrieval. Esto ahorra cómputo y latencia, además de costo de IA.
 
 ### 3.3 Infraestructura AWS
 
@@ -914,80 +773,15 @@ sequenceDiagram
 | `X-Cypher-Version` | No | Versión del protocolo (v1 por defecto) |
 | `X-Cypher-Decrypted` | No | Inyectado por Lambda@Edge: `true` si se descifró correctamente |
 
-#### 5.2.3 Proceso de Cifrado (Widget → Servidor)
+#### 5.2.3 Proceso de Cifrado y Descifrado (X-Cypher)
 
-```
-1. Derivación de clave de sesión:
-   session_key = PBKDF2(
-       password = access_token,
-       salt = "capillas-xcypher-v1" || tenant_id,
-       iterations = 100000,
-       key_length = 256 bits,
-       hash = SHA-256
-   )
+**En el widget:** Cada request se cifra con AES-256-GCM usando una clave de sesión derivada del token de acceso mediante PBKDF2. El body del mensaje y los headers (Authorization, Content-Type, etc.) se cifran por separado, cada uno con su propio IV aleatorio de 12 bytes. El request viaja con `Content-Type: text/plain` y los headers cifrados en cabeceras `X-Cypher-*`.
 
-2. Cifrado del body:
-   iv_body = random(12 bytes)
-   ciphertext_body = AES-256-GCM(session_key, iv_body, JSON.stringify(request_body))
+**En Lambda@Edge:** Una función en CloudFront intercepta el request. Verifica que `X-Cypher-Enabled: true`, reconstruye la clave de sesión desde el token de acceso, descifra los headers y el body, inyecta una cabecera `X-Cypher-Decrypted: true`, y envía el request reconstruido a API Gateway. La respuesta del servidor se vuelve a cifrar antes de devolverla al widget.
 
-3. Cifrado de headers:
-   headers_to_encrypt = {
-       "authorization": "Bearer eyJ...",
-       "x-api-key": "live_xxx",
-       "content-type": "application/json"
-   }
-   iv_headers = random(12 bytes)
-   ciphertext_headers = AES-256-GCM(session_key, iv_headers, JSON.stringify(headers_to_encrypt))
+**Modo B2B:** Para integraciones server-to-server, se envía `X-Cypher-Enabled: false`. El body viaja como JSON plano por TLS 1.3 sin cifrado extra. Esto permite depuración y evita latencia innecesaria en comunicaciones back-to-back dentro de la VPC privada.
 
-4. Request final:
-   POST /api/chat
-   Body: base64(ciphertext_body)
-   Headers:
-     X-Cypher-Enabled: true
-     X-Cypher-Headers: base64(ciphertext_headers)
-     X-Cypher-IV: base64(iv_body)
-     X-Cypher-Headers-IV: base64(iv_headers)
-     Content-Type: text/plain  ← (siempre text/plain cuando cifrado)
-```
-
-#### 5.2.4 Proceso de Descifrado (Lambda@Edge — CloudFront)
-
-```
-1. Lambda@Edge intercepta el request en Origin Request
-
-2. Verifica X-Cypher-Enabled:
-   - Si false → pasa el request sin modificar (B2B mode)
-   - Si true → continúa
-
-3. Reconstruye session key desde el access token:
-   AT = extraído de JWT o X-Cypher-Headers descifrado
-   session_key = PBKDF2(AT, salt, 100000)
-
-4. Descifra headers:
-   iv_headers = base64_decode(X-Cypher-Headers-IV)
-   raw_headers = base64_decode(X-Cypher-Headers)
-   headers_json = AES-256-GCM_decrypt(session_key, iv_headers, raw_headers)
-   headers_original = JSON.parse(headers_json)
-
-5. Descifra body:
-   iv_body = base64_decode(X-Cypher-IV)
-   raw_body = base64_decode(request_body)
-   body_json = AES-256-GCM_decrypt(session_key, iv_body, raw_body)
-   body_original = JSON.parse(body_json)
-
-6. Reconstruye request:
-   - Headers originales inyectados
-   - Body original (JSON)
-   - Inyecta X-Cypher-Decrypted: true
-   - Envía a API Gateway → microservicios
-
-7. En el response (Origin Response):
-   - Toma el body JSON de la respuesta
-   - Cifra con AES-256-GCM usando la misma session key
-   - Devuelve body cifrado + X-Cypher-IV fresco
-```
-
-#### 5.2.5 Manejo de Claves y Sesiones
+#### 5.2.4 Manejo de Claves y Sesiones
 
 | Aspecto | Detalle |
 |---------|---------|
@@ -1001,11 +795,7 @@ sequenceDiagram
 
 #### 5.2.6 Modo B2B (Desactivar Cifrado)
 
-Para integraciones **server-to-server** (ej. API consumida por otro backend interno, o por sistemas de terceros), el cifrado se desactiva enviando:
-
-```
-X-Cypher-Enabled: false
-```
+Para integraciones **server-to-server** (ej. API consumida por otro backend interno, o por sistemas de terceros), el cifrado se desactiva enviando la cabecera `X-Cypher-Enabled: false`.
 
 En este modo:
 - El body viaja como JSON plano
@@ -1039,24 +829,7 @@ En este modo:
 | **Minimización** | Solo recolectar datos necesarios para la asesoría |
 | **Cifrado extremo a extremo** | X-Cypher cumple el principio de confidencialidad. Datos cifrados durante todo el tránsito |
 
-**Pipeline de anonimización antes del LLM:**
-
-```
-Datos crudos del cliente (nombre, documento, teléfono, dirección)
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  1. Detección de PII (regex + NER)  │
-│  2. Reemplazo con tokens anónimos   │
-│     ("Cliente-001", 60 años,        │
-│      "Familia 4 personas")          │
-│  3. Verificación de fuga de PII     │
-│  4. Envío a Bedrock (sin PII)       │
-└─────────────────────────────────────┘
-    │
-    ▼
-Bedrock (Claude) — NUNCA recibe datos personales
-```
+**Pipeline de anonimización antes del LLM:** Antes de que cualquier consulta llegue a Bedrock, se ejecuta un pipeline que detecta datos personales (nombres, documentos, teléfonos, direcciones) mediante expresiones regulares y reconocimiento de entidades, los reemplaza con tokens anónimos ("Cliente-001", "60 años"), verifica que no haya fugas, y solo entonces envía la consulta anonimizada a Claude. Claude nunca recibe datos personales.
 
 ### 5.4 Secret Management
 
@@ -1129,9 +902,11 @@ gantt
 | Actividad | Entregable |
 |-----------|------------|
 | Setup cuenta AWS, IAM, VPC, Security Groups | Infraestructura base Terraform |
-| Cognito User Pool, OAuth 2.0, PKCE | Auth service funcional en QA |
+| **Opción 2:** Cognito User Pool, OAuth 2.0, PKCE | Auth service funcional (solo si aplica) |
+| **Opción 2:** App SPA base con login | Host app con login integrado (solo si aplica) |
+| Widget embebible recibe token desde host | Mecanismo de auth delegado funcional |
 | CI/CD: GitHub Actions + ECR + ECS | Pipeline de deploy a QA |
-| **Demo 1:** Cliente puede crear usuario e iniciar sesión en QA | ✅ |
+| **Demo 1:** Widget cargado en host de prueba con token funcional | ✅ |
 
 #### Sprint 2: Widget base + BFF (semana 3-4)
 
@@ -1228,26 +1003,7 @@ gantt
 
 ### 6.6 Piloto y Feedback Loop
 
-```
-Sprint 5: MVP funcional completo en QA
-    │
-    ▼
-Sprint 6: Despliegue a producción (5-10 asesores)
-    │
-    ▼
-Asesores usan el sistema (2 semanas)
-    │
-    ├─ Feedback recolectado vía:
-    │   • Encuesta integrada en el widget (satisfacción 1-5)
-    │   • Logs de conversaciones (con consentimiento)
-    │   • Entrevista con 2-3 asesores
-    │
-    ▼
-Sprint 7: Ajustes según feedback
-    │
-    ▼
-Sprint 8-10: Features adicionales + escalamiento
-```
+Después del Sprint 5 (MVP funcional en QA), se despliega a producción con 5-10 asesores reales durante 2 semanas. Durante ese período se recolecta feedback mediante encuestas integradas en el widget, logs de conversaciones (con consentimiento) y entrevistas con asesores. El Sprint 7 se dedica a ajustes basados en ese feedback, y los sprints 8-10 continúan con features adicionales y escalamiento.
 
 ---
 
@@ -1351,7 +1107,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 
 ## 8. Modelos de Contratación y Precios
 
-Este proyecto se ofrece bajo dos modelos de contratación. La diferencia clave es quién asume los costos de infraestructura AWS y quién los administra.
+Este proyecto se ofrece bajo dos modelos de contratación. Cada modelo tiene **dos variantes** según el modo de despliegue (ver [2.1 Modalidades de Despliegue](#21-modalidades-de-despliegue)).
 
 ### 8.1 Modelo A: Desarrollo por Proyecto (Cliente administra Cloud)
 
@@ -1359,27 +1115,32 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 
 #### 8.1.1 Alcance
 
-| Componente | Incluido |
-|-----------|----------|
-| Frontend (Widget Lit 3) | ✅ Desarrollo completo |
-| Backend (BFF, RAG, KB, Analytics) | ✅ Desarrollo completo |
-| Infraestructura AWS (Terraform) | ✅ Código IaC + manual de deploy |
-| CI/CD (GitHub Actions) | ✅ Pipeline completo |
-| Autenticación (Cognito + OAuth) | ✅ Configuración |
-| Widget + BFF + RAG integrados | ✅ End-to-end |
-| Piloto con 5-10 asesores | ✅ Acompañamiento 2 semanas |
-| Documentación técnica | ✅ |
-| Capacitación equipo cliente | ✅ 2 sesiones |
-| **Cuenta AWS, soporte cloud, mantenimiento** | ❌ A cargo del cliente |
+| Componente | Opción 1<br/>Widget solo | Opción 2<br/>App completa |
+|-----------|:------------------------:|:--------------------------:|
+| Frontend (Widget Lit 3) | ✅ Desarrollo completo | ✅ Desarrollo completo |
+| App anfitriona SPA con login | ❌ A cargo del cliente | ✅ Desarrollo completo |
+| Backend (BFF, RAG, KB, Analytics) | ✅ Desarrollo completo | ✅ Desarrollo completo |
+| Infraestructura AWS (Terraform) | ✅ Código IaC + manual de deploy | ✅ Código IaC + manual de deploy |
+| CI/CD (GitHub Actions) | ✅ Pipeline completo | ✅ Pipeline completo |
+| Autenticación (Cognito + OAuth) | ❌ El cliente usa su propio auth | ✅ Configuración completa |
+| Widget + BFF + RAG integrados | ✅ End-to-end | ✅ End-to-end |
+| Piloto con 5-10 asesores | ✅ Acompañamiento 2 semanas | ✅ Acompañamiento 2 semanas |
+| Documentación técnica | ✅ | ✅ |
+| Capacitación equipo cliente | ✅ 2 sesiones | ✅ 2 sesiones |
+| **Cuenta AWS, soporte cloud, mantenimiento** | ❌ A cargo del cliente | ❌ A cargo del cliente |
 
 #### 8.1.2 Estimación de Esfuerzo y Costo
 
-| Duración | Horas/sem | Total horas | Precio (COP) | Tarifa efectiva |
-|----------|-----------|-------------|--------------|-----------------|
-| **4 meses** | 20 hrs/sem | ~320 hrs | **$48.000.000** | ~$150.000/hr (~$43 USD/hr) |
-| **6 meses** | 20 hrs/sem | ~480 hrs | **$70.000.000** | ~$146.000/hr (~$42 USD/hr) |
-| **3 meses (intensivo)** | 40 hrs/sem | ~480 hrs | **$65.000.000** | ~$135.000/hr (~$39 USD/hr) |
+| Duración | Opción | Horas/sem | Total horas | Precio (COP) | Tarifa efectiva |
+|----------|--------|-----------|-------------|--------------|-----------------|
+| **4 meses** | Opción 1 — Widget solo | 16 hrs/sem | ~256 hrs | **$38.000.000** | ~$148.000/hr (~$43 USD/hr) |
+| **4 meses** | Opción 2 — App completa | 20 hrs/sem | ~320 hrs | **$48.000.000** | ~$150.000/hr (~$43 USD/hr) |
+| **6 meses** | Opción 1 — Widget solo | 16 hrs/sem | ~384 hrs | **$56.000.000** | ~$146.000/hr (~$42 USD/hr) |
+| **6 meses** | Opción 2 — App completa | 20 hrs/sem | ~480 hrs | **$70.000.000** | ~$146.000/hr (~$42 USD/hr) |
+| **3 meses (intensivo)** | Opción 2 — App completa | 40 hrs/sem | ~480 hrs | **$65.000.000** | ~$135.000/hr (~$39 USD/hr) |
 
+> **Diferencia entre opciones:** La Opción 1 (widget solo) requiere ~20% menos horas porque no incluye construir la app anfitriona ni configurar Cognito. El cliente usa su propio sistema de autenticación y su propia app existente.
+>
 > **¿Es un buen precio?** Para el contexto colombiano:
 > - Desarrollador full-stack senior freelance: $100K-150K COP/hr ($29-$43 USD/hr)
 > - DevOps engineer freelance: $120K-180K COP/hr ($35-$52 USD/hr)
@@ -1411,6 +1172,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | Aspecto | Término |
 |---------|---------|
 | **Duración mínima del contrato** | **12 meses** (para recuperar inversión inicial) |
+| **Modalidad de despliegue** | Opción 1 (Widget solo) o Opción 2 (App completa) |
 | **Facturación** | Mensual, anticipada (días 1 de cada mes) |
 | **Forma de pago** | Transferencia electrónica o débito |
 | **Penalización por cancelación anticipada** | Pago del 50% de los meses restantes del contrato |
@@ -1419,62 +1181,70 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 #### 8.2.2 Flujo de Pagos — Mes a Mes
 
-| Mes | Concepto | Monto (COP) | Notas |
-|-----|----------|-------------|-------|
-| **Mes 0** | Setup + primera mensualidad | **$18.500.000** | Se paga **antes de empezar**. Cubre setup ($11M) + mes 1 ($7.5M) |
-| **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | Infraestructura QA operativa, primeras demos |
-| **Mes 2** | Mensualidad | **$7.500.000** | Desarrollo continúa (sprints 3-4) |
-| **Mes 3** | Mensualidad | **$7.500.000** | Sprint 5: MVP funcional en QA |
-| **Mes 4** | Mensualidad | **$7.500.000** | Sprint 6: Piloto 5-10 asesores en producción |
-| **Mes 5-12** | Mensualidad | **$7.500.000/mes** | Operación continua + mejoras incrementales |
-| **Total Año 1** | | **$101.000.000** | $18.5M (mes 0) + 11 × $7.5M |
+| Mes | Concepto | Opción 1<br/>Widget solo (COP) | Opción 2<br/>App completa (COP) | Notas |
+|-----|----------|:--------------------------:|:---------------------------:|-------|
+| **Mes 0** | Setup + primera mensualidad | **$15.000.000** | **$18.500.000** | Se paga **antes de empezar**. Cubre setup + mes 1 |
+| **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | ✅ Incluido | Infraestructura QA operativa, primeras demos |
+| **Mes 2** | Mensualidad | **$5.500.000** | **$7.500.000** | Desarrollo continúa (sprints 3-4) |
+| **Mes 3** | Mensualidad | **$5.500.000** | **$7.500.000** | Sprint 5: MVP funcional en QA |
+| **Mes 4** | Mensualidad | **$5.500.000** | **$7.500.000** | Sprint 6: Piloto 5-10 asesores |
+| **Mes 5-12** | Mensualidad | **$5.500.000/mes** | **$7.500.000/mes** | Operación continua + mejoras |
+| **Total Año 1** | | **$75.500.000** | **$101.000.000** | Setup + 11 mensualidades |
 
-> **¿Por qué $18.5M upfront?** Para cubrir: setup de infraestructura AWS, dominios, certificados SSL, configuración inicial y primera mensualidad. Si el cliente cancela en el mes 1, al menos recuperamos los costos de setup + el primer mes de operación.
+> **¿Por qué la diferencia?** La Opción 1 (Widget solo) es más económica porque el cliente ya tiene su propia app y sistema de autenticación. No requiere construir app anfitriona ni configurar Cognito, lo que reduce el setup en ~$3.5M y la mensualidad en ~$2M.
 
 #### 8.2.3 Qué Pasa Si el Cliente Cancela Antes de los 12 Meses
 
-| Cancelación en mes | Ya pagó (COP) | Penalización (COP) | Total recuperado (COP) |
-|-------------------|---------------|-------------------|------------------------|
-| Mes 1 | $18.500.000 | 50% × 11 meses × $7.5M = **$41.250.000** | **$59.750.000** |
-| Mes 3 | $33.500.000 | 50% × 9 meses × $7.5M = **$33.750.000** | **$67.250.000** |
-| Mes 6 | $56.000.000 | 50% × 6 meses × $7.5M = **$22.500.000** | **$78.500.000** |
-| Mes 12 | $101.000.000 | $0 (completó el contrato) | **$101.000.000** |
+| Cancelación en mes | Opción | Ya pagó (COP) | Penalización (COP) | Total recuperado (COP) |
+|-------------------|--------|---------------|-------------------|------------------------|
+| Mes 1 | Opción 1 | $15.000.000 | 50% × 11 meses × $5.5M = **$30.250.000** | **$45.250.000** |
+| Mes 1 | Opción 2 | $18.500.000 | 50% × 11 meses × $7.5M = **$41.250.000** | **$59.750.000** |
+| Mes 3 | Opción 1 | $26.000.000 | 50% × 9 meses × $5.5M = **$24.750.000** | **$50.750.000** |
+| Mes 3 | Opción 2 | $33.500.000 | 50% × 9 meses × $7.5M = **$33.750.000** | **$67.250.000** |
+| Mes 6 | Opción 1 | $42.500.000 | 50% × 6 meses × $5.5M = **$16.500.000** | **$59.000.000** |
+| Mes 6 | Opción 2 | $56.000.000 | 50% × 6 meses × $7.5M = **$22.500.000** | **$78.500.000** |
+| Mes 12 | Opción 1 | $75.500.000 | $0 (completó el contrato) | **$75.500.000** |
+| Mes 12 | Opción 2 | $101.000.000 | $0 (completó el contrato) | **$101.000.000** |
 
 #### 8.2.4 Inversión Inicial (Setup) — Incluido en el Mes 0
 
-| Concepto | Costo único (COP) |
-|----------|-------------------|
-| Creación de cuenta AWS, IAM, organización multi-cuenta | $3.000.000 |
-| Configuración de infraestructura base (VPC, subnets, Terraform) | $3.000.000 |
-| Registro de dominio + certificados SSL + CDN | $1.000.000 |
-| Implementación del widget en sitio del cliente | $2.000.000 |
-| Onboarding + capacitación inicial (2 sesiones) | $1.000.000 |
-| Personalización de tema/colores/marca | $1.000.000 |
-| **Total Setup** | **$11.000.000** |
+| Concepto | Opción 1<br/>Widget solo | Opción 2<br/>App completa |
+|----------|:------------------------:|:-------------------------:|
+| Creación de cuenta AWS, IAM, organización multi-cuenta | $2.500.000 | $2.500.000 |
+| Configuración de infraestructura base (VPC, subnets, Terraform) | $3.000.000 | $3.000.000 |
+| Registro de dominio + certificados SSL + CDN | $1.000.000 | $1.000.000 |
+| App SPA anfitriona con login (Cognito + OAuth) | ❌ No aplica | $2.000.000 |
+| Integración del widget con sistema existente del cliente | $2.000.000 | $1.000.000 |
+| Onboarding + capacitación inicial (2 sesiones) | $500.000 | $500.000 |
+| Personalización de tema/colores/marca | $500.000 | $1.000.000 |
+| **Total Setup** | **$9.500.000** | **$11.000.000** |
 
 #### 8.2.5 Mensualidad por Plan
 
-| Plan | Conversaciones/mes | Precio/mes (COP) | Ideal para |
-|------|-------------------|-------------------|------------|
-| **Básico** | Hasta 100 | **$5.000.000** | Piloto, < 10 asesores |
-| **Estándar** | Hasta 1.000 | **$7.500.000** | Producción, ~100 asesores |
-| **Premium** | Hasta 5.000 | **$11.000.000** | Escalado, ~500 asesores |
-| **Ilimitado** | Sin límite | **$16.000.000** | Gran volumen |
+| Plan | Conversaciones/mes | Opción 1<br/>Widget solo (COP) | Opción 2<br/>App completa (COP) | Ideal para |
+|------|-------------------|:---------------------------:|:----------------------------:|------------|
+| **Básico** | Hasta 100 | **$4.000.000** | **$5.500.000** | Piloto, < 10 asesores |
+| **Estándar** | Hasta 1.000 | **$5.500.000** | **$7.500.000** | Producción, ~100 asesores |
+| **Premium** | Hasta 5.000 | **$9.000.000** | **$11.000.000** | Escalado, ~500 asesores |
+| **Ilimitado** | Sin límite | **$14.000.000** | **$16.000.000** | Gran volumen |
 
 > **¿Qué incluye la mensualidad?** Infraestructura AWS (producción + QA), mantenimiento de microservicios, soporte técnico (horario laboral L-V 8am-6pm), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel** (gestión de documentos), pipeline de ingesta de documentos.
+>
+> **Diferencia entre opciones:** La Opción 1 es ~$2M/mes más barata porque el cliente ya tiene su propio sistema de autenticación y app anfitriona, lo que reduce el mantenimiento y soporte requerido.
 
 #### 8.2.6 Desglose de Costos del Plan Estándar
 
-| Componente | Costo/mes (COP) |
-|------------|-----------------|
-| Infraestructura AWS (producción 100 ases + QA) | ~$2.059.000 |
-| Dominio + CDN + SSL/TLS | ~$100.000 |
-| Mantenimiento y soporte (~15 hrs/mes) | ~$2.250.000 |
-| Monitoreo + actualizaciones de seguridad | ~$500.000 |
-| Gestión de KB Admin + pipeline de ingesta | ~$500.000 |
-| **Subtotal costo** | **~$5.409.000** |
-| Margen de servicio (~28%) | ~$2.091.000 |
-| **Precio al cliente** | **~$7.500.000** |
+| Componente | Opción 1<br/>Widget solo (COP) | Opción 2<br/>App completa (COP) |
+|------------|:---------------------------:|:----------------------------:|
+| Infraestructura AWS (producción 100 ases + QA) | ~$2.059.000 | ~$2.059.000 |
+| Dominio + CDN + SSL/TLS | ~$100.000 | ~$100.000 |
+| App SPA + Auth (Cognito) mantenimiento | ❌ No aplica | ~$500.000 |
+| Mantenimiento y soporte (~10-15 hrs/mes) | ~$1.500.000 | ~$2.250.000 |
+| Monitoreo + actualizaciones de seguridad | ~$400.000 | ~$500.000 |
+| Gestión de KB Admin + pipeline de ingesta | ~$500.000 | ~$500.000 |
+| **Subtotal costo** | **~$4.559.000** | **~$5.909.000** |
+| Margen de servicio (~17-21%) | ~$941.000 | ~$1.591.000 |
+| **Precio al cliente** | **~$5.500.000** | **~$7.500.000** |
 
 #### 8.2.7 Excedentes y Penalizaciones
 
@@ -1501,42 +1271,43 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 | Sprint | Semana | Demo para el cliente | Pago |
 |--------|--------|---------------------|------|
-| **Setup** | 0 | — | **$18.500.000** (Mes 0) |
+| **Setup** | 0 | — | **$15.000.000** (Op. 1) / **$18.500.000** (Op. 2)<br/>Mes 0 |
 | Sprint 1 | 1-2 | Infraestructura + Auth funcional en QA | — |
-| Sprint 2 | 3-4 | Widget + BFF + cifrado en QA | $7.500.000 (Mes 2) |
+| Sprint 2 | 3-4 | Widget + BFF + cifrado en QA | **$5.5M** (Op. 1) / **$7.5M** (Op. 2)<br/>Mes 2 |
 | Sprint 3 | 5-6 | KB Admin v1 + RAG simple en QA | — |
-| Sprint 4 | 7-8 | Chat funcional con IA en QA | $7.500.000 (Mes 3) |
+| Sprint 4 | 7-8 | Chat funcional con IA en QA | **$5.5M** (Op. 1) / **$7.5M** (Op. 2)<br/>Mes 3 |
 | Sprint 5 | 9-10 | Chat completo cifrado + PII | — |
-| Sprint 6 | 11-12 | **Piloto en producción (5-10 asesores)** | $7.500.000 (Mes 4) |
+| Sprint 6 | 11-12 | **Piloto en producción (5-10 asesores)** | **$5.5M** (Op. 1) / **$7.5M** (Op. 2)<br/>Mes 4 |
 | Sprint 7 | 13-14 | Ajustes post-piloto | — |
-| Sprint 8 | 15-16 | KB Admin completo | $7.500.000 (Mes 5) |
+| Sprint 8 | 15-16 | KB Admin completo | **$5.5M** (Op. 1) / **$7.5M** (Op. 2)<br/>Mes 5 |
 | Sprint 9 | 17-18 | Cache + performance | — |
-| Sprint 10 | 19-20 | Analytics + seguridad + documentación | $7.500.000 (Mes 6+) |
+| Sprint 10 | 19-20 | Analytics + seguridad + documentación | **$5.5M** (Op. 1) / **$7.5M** (Op. 2)<br/>Mes 6+ |
 
 ### 8.3 Comparativa y Recomendación
 
-| Aspecto | Modelo A (Desarrollo) | Modelo B (Servicio) |
-|---------|----------------------|---------------------|
-| **Inversión inicial** | $48M (todo upfront) | $18.5M (setup + mes 1) |
-| **Costo mes 2-4** | $0 (solo desarrollo) | $7.5M/mes |
-| **Costo año 1 total** | ~$54M + AWS ~$6M = **~$60M** | **$101M** |
-| **Costo año 2+** | AWS: ~$12M + soporte externo: ~$108M = **~$120M/año** | **~$90M/año** ($7.5M × 12) |
-| **Soporte continuo** | ❌ No incluido | ✅ Incluido |
-| **Riesgo de cancelación** | Bajo (pago por hitos) | Mitigado (contrato 12 meses) |
-| **Quién opera AWS** | Cliente | Nosotros |
-| **KB Admin Panel** | ✅ Incluido en desarrollo | ✅ Incluido |
-| **Pipeline de ingesta** | ✅ Incluido | ✅ Incluido |
+| Aspecto | Modelo A (Desarrollo) | Modelo B — Opción 1<br/>Widget solo | Modelo B — Opción 2<br/>App completa |
+|---------|----------------------|:-----------------------------------:|:------------------------------------:|
+| **Inversión inicial** | $48M (todo upfront) | **$15M** (setup + mes 1) | **$18.5M** (setup + mes 1) |
+| **Costo mensual** | $0 (solo desarrollo) | **$5.5M/mes** | **$7.5M/mes** |
+| **Costo año 1 total** | ~$54M + AWS ~$6M = **~$60M** | **$75.5M** | **$101M** |
+| **Costo año 2+** | AWS: ~$12M + soporte externo: ~$108M = **~$120M/año** | **$66M/año** | **$90M/año** |
+| **App anfitriona** | ❌ A cargo del cliente | ❌ A cargo del cliente | ✅ Nosotros |
+| **Auth / Login** | ❌ A cargo del cliente | ❌ A cargo del cliente | ✅ Nosotros (Cognito) |
+| **Soporte continuo** | ❌ No incluido | ✅ Incluido | ✅ Incluido |
+| **Riesgo de cancelación** | Bajo (pago por hitos) | Mitigado (contrato 12 meses) | Mitigado (contrato 12 meses) |
+| **Quién opera AWS** | Cliente | Nosotros | Nosotros |
+| **KB Admin Panel** | ✅ Incluido | ✅ Incluido | ✅ Incluido |
+| **Pipeline de ingesta** | ✅ Incluido | ✅ Incluido | ✅ Incluido |
 
-**Recomendación:** Para Capillas de la Fe, se recomienda **Modelo B (Servicio Mensual)** por:
+**Recomendación:** Para Capillas de la Fe, la mejor opción depende de su situación actual:
 
-1. **Sin riesgo de infraestructura**: El cliente no necesita expertise AWS ni preocuparse por facturas variables
-2. **Costo predecible**: Mensualidad fija sin sorpresas
-3. **Soporte continuo**: Actualizaciones, seguridad, monitoreo incluidos
-4. **Escalamiento transparente**: Cuando crezcan, nosotros ajustamos la infraestructura
-5. **Menor inversión inicial**: $18.5M vs $48M del Modelo A
-6. **Más económico a largo plazo**: Año 2+ = $90M/año vs ~$120M/año (AWS + contratar soporte)
+| Si Capillas... | Recomendación |
+|---------------|---------------|
+| **Ya tiene app web con login propio** | **Modelo B — Opción 1** (~$15M setup + $5.5M/mes). Solo instala los widgets y pasa el token. |
+| **No tiene app ni sistema de auth** | **Modelo B — Opción 2** (~$18.5M setup + $7.5M/mes). Incluye app SPA con login completo. |
+| **Quiere tener el control total de su infraestructura** | **Modelo A** ($48M upfront). Recibe el código y lo opera internamente. |
 
-> 💡 **Consejo:** Si el cliente duda por el compromiso de 12 meses, se puede ofrecer un **periodo de prueba de 3 meses** con contrato mensual a precio Estándar ($7.5M/mes + setup $11M = $18.5M mes 1, luego $7.5M/mes). Si a los 3 meses quieren continuar, firman el contrato anual. Si no, cada quien sigue su camino — nosotros recuperamos los costos de desarrollo + AWS.
+> 💡 **Periodo de prueba:** Si el cliente duda, ofrecemos **3 meses de prueba** con contrato mensual. Si continúa, firma el anual. Si no, recuperamos costos de setup + AWS.
 
 ---
 

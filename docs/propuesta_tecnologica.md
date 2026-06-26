@@ -46,13 +46,15 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **Observabilidad** | OpenTelemetry + LangFuse (self-hosted) + Grafana | Datos soberanos, trazabilidad completa |
 | **CI/CD** | GitHub Actions + ECR + ECS | Despliegue automatizado blue/green |
 
-### 1.3 Costo Mensual Estimado (COP)
+### 1.3 Costo Mensual de Infraestructura AWS (COP)
+
+> **Nota:** Esta tabla muestra exclusivamente el costo de los servicios en la nube AWS. No incluye desarrollo, soporte, mantenimiento ni margen de servicio. Para el costo total del servicio mensual (infra + soporte + margen), ver [Sección 8 — Modelos de Contratación](#8-modelos-de-contratación-y-precios).
 
 | Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
 |-------|-----------------|------------------|----------|-------------|
-| **MVP / Desarrollo** | ~$200-400/mes | ~$690.000-1.380.000 | < 10 asesores | 1-2 microservicios, instancias pequeñas |
-| **Producción inicial** | ~$400-800/mes | ~$1.380.000-2.760.000 | 100 asesores | 3-5 servicios, HA parcial |
-| **Escalado** | ~$800-1,500/mes | ~$2.760.000-5.175.000 | 500+ asesores | HA completa, múltiples AZ |
+| **MVP / Desarrollo** | ~$90-170/mes | ~$314.000-586.000 | < 10 asesores | 1-2 microservicios, instancias pequeñas + QA |
+| **Producción (100 asesores)** | ~$525/mes | ~$1.804.000 | 100 asesores | 4-5 servicios, HA parcial |
+| **Escalado (500+ asesores)** | ~$1.306/mes | ~$4.506.000 | 500+ asesores | HA completa, múltiples AZ |
 
 ---
 
@@ -74,11 +76,13 @@ graph TB
     REDIS[Redis Cache Cache y Sesiones]
     BEDROCK[Bedrock Claude y Titan]
     KMS[AWS KMS Cifrado]
+    KBADMIN[KB Admin Widget<br/>Lit 3 gestion docs]
 
     HostApp -->|script tag| CDN
+    HostApp -->|HTTPS| KBADMIN
     HostApp -->|HTTPS| WIDGET
     WIDGET -->|POST cifrado| GW
-    KBADMIN[KB Admin Widget<br/>Lit 3 gestion docs] -->|POST cifrado| GW
+    KBADMIN -->|POST cifrado| GW
     GW -->|HTTP| BFF
     GW -->|OAuth| AUTH
     GW -->|Async| ANALYTICS
@@ -166,7 +170,7 @@ sequenceDiagram
 ```mermaid
 graph LR
     WIDGET[Widget Lit 3 - Cliente]
-    LAMBDA[Lambda@Edge - Descifrador]
+    LAMBDA["Lambda@Edge - Descifrador"]
     GW[API Gateway]
     BFF[BFF Service]
     RAG[RAG Service]
@@ -421,6 +425,167 @@ QUERY (Online / Tiempo Real)
     → Store in semantic cache
     → Log to Analytics
 ```
+
+#### 3.2.4 Model Routing — Clasificador de Complejidad de Consulta
+
+Para decidir si una consulta va a **Haiku** (económico) o **Sonnet** (completo), implementamos un clasificador de dos niveles que minimiza el costo sin sacrificar calidad.
+
+**Arquitectura del Routing:**
+
+```mermaid
+flowchart TB
+    CACHE{"Cache Miss"}
+    L1["Nivel 1 — Reglas<br/>heurísticas<br/>(~99% precisión en<br/>consultas triviales)"]
+    L1_SIMPLE["➡ Haiku<br/>$35 COP/consulta"]
+    L2["Nivel 2 — Clasificador<br/>Haiku vía prompt<br/>(~97% precisión en<br/>consultas complejas)"]
+    L2_SIMPLE["➡ Haiku<br/>$33 COP/consulta<br/>(incluye clasificación)"]
+    L2_COMPLEX["➡ Sonnet<br/>$100 COP/consulta"]
+    ANALYTICS["Analytics → log<br/>decisión + confianza"]
+
+    CACHE -->|Miss| L1
+    L1 -->|"Saludo, horario,<br/>pregunta simple"| L1_SIMPLE
+    L1 -->|"Requiere análisis"| L2
+    L2 -->|"Clasifica como simple<br/>(confianza > 0.8)"| L2_SIMPLE
+    L2 -->|"Clasifica como compleja"| L2_COMPLEX
+    L1_SIMPLE --> ANALYTICS
+    L2_SIMPLE --> ANALYTICS
+    L2_COMPLEX --> ANALYTICS
+```
+
+**Nivel 1 — Reglas Heurísticas (sin costo):**
+
+Se ejecuta antes de cualquier llamada a Bedrock. Usa expresiones regulares y patrones de texto. Clasifica como **simple** si alguna regla hace match:
+
+| Categoría | Patrón | Ejemplo |
+|-----------|--------|---------|
+| Saludos | `^(hola\|buenos\|buenas\|hey\|saludos)[\s\p{P}]?` | "Hola", "Buenos días" |
+| Despedidas | `^(gracias\|chao\|bye\|adiós\|nos vemos)[\s\p{P}]?` | "Gracias", "Chao" |
+| Afirmación/negación | `^(sí\|no\|ok\|dale\|listo\|claro)[\s\p{P}]?$` | "Sí", "OK" |
+| Cortas sin verbo | longitud < 4 palabras sin verbo conjugado | "Horarios", "¿Qué planes?" |
+| Ayuda explícita | `^(ayuda\|help\|qué puedes hacer\|qué haces)` | "Ayuda", "¿Qué puedes hacer?" |
+| Repetición | `^(repite\|otra vez\|no entendí\|no escuché)` | "Repite por favor" |
+
+**Implementación del clasificador (RAG Service):**
+
+```python
+# Nivel 1: Heurísticas (0 tokens, 0ms overhead)
+async def rule_based_classifier(query: str) -> Complexity | None:
+    patterns = {
+        Complexity.SIMPLE: [
+            r"^(hola|buenos|buenas|hey|saludos)[\s\p{P}]?",
+            r"^(gracias|chao|bye|adiós|nos\s+vemos)[\s\p{P}]?",
+            r"^(sí|no|ok|dale|listo|claro)[\s\p{P}]?$",
+            r"^(ayuda|help|qué\s+puedes)",
+            r"^(repite|otra\s+vez|no\s+entendí)",
+        ],
+        Complexity.COMPLEX: [
+            r"compar(a|e)", r"recomiend(a|e)", r"mejor\s+(opción|plan)",
+            r"diferencia", r"cuál\s+(me|le)", r"cliente\s+dice",
+        ],
+    }
+    for complexity, regexes in patterns.items():
+        if any(re.search(p, query.strip().lower()) for p in regexes):
+            return complexity
+    return None  # Pasa a Nivel 2
+```
+
+**Nivel 2 — Clasificador Haiku (bajo costo):**
+
+Si las reglas no deciden, se invoca Haiku con un prompt especializado para clasificar la consulta. Una sola llamada Haiku clasifica + responde si la consulta es simple:
+
+```python
+# Nivel 2: Clasificación + respuesta con Haiku
+async def classify_with_haiku(query: str) -> tuple[Complexity, str]:
+    prompt = f"""Eres un clasificador de consultas para un asistente de ventas funerarias.
+
+Consulta: "{query}"
+
+Clasifica si esta consulta es SIMPLE o COMPLEJA:
+
+SIMPLE = saludos, horarios, agradecimientos, confirmaciones,
+         preguntas de una palabra, ayuda general, repeticiones
+
+COMPLEJA = recomendaciones de planes, manejo de objeciones,
+           comparación de productos, análisis de perfil de cliente,
+           preguntas sobre coberturas, situación emocional del cliente
+
+Responde SOLO con una línea JSON:
+{{"complejidad": "SIMPLE"|"COMPLEJA", "confianza": 0.0-1.0,
+  "respuesta": "respuesta directa si es SIMPLE, o vácia si es COMPLEJA"}}"""
+
+    response = await bedrock.invoke_haiku(prompt)
+    return parse_response(response)
+```
+
+**Flujo completo de decisión:**
+
+```
+Cache MISS
+  │
+  ▼
+Nivel 1 (Reglas)
+  │
+  ├─ Simple → Haiku (responde directo con llamada barata)
+  │
+  └─ No clasificó → Nivel 2 (Haiku clasificador)
+       │
+       ├─ Simple (confianza > 0.8) → Haiku responde
+       │
+       └─ Compleja (o confianza ≤ 0.8) → Sonnet responde
+```
+
+**Ahorro estimado:**
+
+| Tipo de consulta | % del total | Modelo | Costo/consulta | Sin routing | Con routing |
+|-----------------|------------|--------|---------------|-------------|-------------|
+| Cache hit | ~68% | Redis | ~$0 | $0 | $0 |
+| Simple (Nivel 1) | ~10% | Haiku | ~$35 | ~$100 | ~$35 |
+| Simple (Nivel 2) | ~7% | Haiku | ~$33* | ~$100 | ~$33 |
+| Compleja | ~15% | Sonnet | ~$100 | ~$100 | ~$100 |
+| **Costo promedio** | 100% | Mixto | — | **~$100/consulta** | **~$50-65/consulta** |
+
+*Incluye ~$2 de la llamada clasificadora + ~$33 de respuesta Haiku = ~$35 en total, o el clasificador puede devolver respuesta directa eliminando la segunda llamada.
+
+**Consideraciones adicionales:**
+
+| Aspecto | Detalle |
+|---------|---------|
+| **Latencia Nivel 1** | < 1ms (regex en memoria, no hay I/O) |
+| **Latencia Nivel 2** | ~300ms (Haiku es rápido) vs ~800ms si fuera directo a Sonnet — la clasificación apenas añade 100-200ms extras sobre el tiempo de respuesta de la consulta simple |
+| **Degradación graceful** | Si Haiku clasificador falla (timeout o error), se asume COMPLEJA y se envía a Sonnet — pérdida de ahorro, no de calidad |
+| **Monitoreo** | Cada decisión se loguea en Analytics: `{"query": "hash", "nivel": 1|2, "modelo": "haiku"|"sonnet", "confianza": 0.95}` |
+| **Ajuste de umbrales** | El umbral de confianza (0.8) se ajusta según datos reales de producción. Si el log muestra consultas complejas mal clasificadas como simples, se sube el umbral |
+| **Override manual** | El system prompt de Sonnet puede detectar inconsistencias y forzar re-consulta si detecta que la respuesta Haiku fue insuficiente |
+| **Fallback por longitud** | Consultas con más de 150 tokens se envían directamente a Sonnet sin clasificar (asumimos que son complejas por su extensión) |
+
+**Actualización del pipeline RAG con routing:**
+
+```
+QUERY (Online / Tiempo Real)
+  Query asesor 
+    → Query Rewrite
+    → Semantic Cache (Redis, umbral 0.92)
+      → [HIT] → Respuesta cacheada ($0)
+      → [MISS] → 
+    → Model Routing:
+      → Nivel 1 (Reglas heurísticas)
+        → Simple → Haiku responde (~$35)
+        → No clasifica → Nivel 2 (Haiku clasificador)
+          → Simple → Haiku responde (~$35)
+          → Compleja → Hay más abajo
+    → [Ruta Compleja ↓]
+    → Hybrid Search (BM25 + vector + metadata filters)
+    → Cross-encoder Reranker (top 50 → top 5)
+    → Parent-child expansion
+    → Context Assembly (< 4K tokens)
+    → Prompt Engineering
+    → Claude Sonnet 4.6 (Bedrock) (~$100)
+    → Streaming response (SSE)
+    → Store in semantic cache
+    → Log to Analytics (incluye decisión de routing)
+```
+
+**Nota:** El routing ocurre **antes** de la búsqueda vectorial. Si la consulta es simple (saludo), no tiene sentido ejecutar Hybrid Search, Reranker, etc. Eso también ahorra cómputo y latencia en el pipeline. Solo las consultas clasificadas como complejas pasan por retrieval completo.
 
 ### 3.3 Infraestructura AWS
 

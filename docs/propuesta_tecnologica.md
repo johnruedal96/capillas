@@ -316,11 +316,10 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 
 | Funcionalidad | Descripción |
 |--------------|-------------|
-| **Subida de documentos** | Arrastrar y soltar PDF, DOCX, MD, TXT. Carga batch. |
-| **Previsualización** | Ver el documento original y cómo queda dividido en chunks después del procesamiento |
+| **Subida de documentos** | Arrastrar y soltar PDF, DOCX, MD, TXT. Todos se convierten internamente a Markdown preservando tablas y estructura. Carga batch. |
+| **Listado de documentos** | Ver todos los documentos cargados, buscar por nombre/categoría |
+| **Visor/descarga** | Visualizar el documento original en el navegador o descargarlo |
 | **Metadatos** | Etiquetar documentos por categoría (planes, objetos, playbooks, clientes, reglas) |
-| **Chunk viewer** | Ver y editar los fragmentos generados automáticamente, ajustar solapamiento |
-| **Búsqueda de prueba** | Probar queries de prueba y ver qué chunks retorna el sistema antes de desplegar |
 | **Historial de ingesta** | Ver estado de cada documento (pendiente, procesando, indexado, error) |
 | **Gestión de versiones** | Reemplazar/reindexar documentos sin perder el histórico |
 
@@ -338,7 +337,7 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 
 **Flujo de comunicación cifrada (idéntico al widget de chat):** El KB Admin Widget envía requests cifrados con [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) al [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) descifra el payload y los headers, reconstruye el request y lo pasa al Knowledge Base Service. La respuesta viaja de vuelta cifrada. Para comunicación interna entre servicios, se desactiva el cifrado con una bandera y viaja en JSON plano.
 
-**Flujo de ingesta de documentos:** El administrador sube un archivo, el servicio lo guarda en [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) y dispara un flujo automático en [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html). Este flujo ejecuta en secuencia: extracción de texto, división en fragmentos, extracción de metadatos, generación de vectores ([embeddings](https://platform.openai.com/docs/guides/embeddings)) y almacenamiento en la base de datos vectorial.
+**Flujo de ingesta de documentos:** El administrador sube un archivo (PDF, DOCX, MD, TXT) y el servicio lo guarda en [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) conservando el original intacto. Inmediatamente se dispara un flujo automático en [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) que: (1) **Convierte el documento a Markdown** — PDFs y DOCXs se transforman a Markdown preservando tablas, listas, títulos y jerarquía; TXT y MD se mantienen tal cual. El Markdown se almacena junto al original en S3. (2) Divide el Markdown en fragmentos semánticos. (3) Extrae metadatos (categoría, fecha, versión). (4) Genera vectores ([embeddings](https://platform.openai.com/docs/guides/embeddings)) con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html). (5) Almacena en [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) [pgvector](https://github.com/pgvector/pgvector). Los LLMs entienden Markdown de forma nativa — tablas, formato y jerarquía se preservan mucho mejor que con texto plano extraído de PDF.
 
 ### 3.2 Backend — Microservicios
 
@@ -369,13 +368,25 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 
 #### 3.2.3 Pipeline RAG (Detalle)
 
-> **Requisito de documentos:** Los PDFs deben venir en **formato de texto nativo** (no escaneados). Si hay imágenes escaneadas, se necesitaría OCR ([AWS Textract](https://docs.aws.amazon.com/textract/latest/dg/what-is.html) o Tesseract), lo cual: (1) Aumenta la complejidad del pipeline de ingesta; (2) Los OCRs pueden confundir caracteres (especialmente nombres propios y precios); (3) Incrementa costos (~$0.015/página con Textract ≈ $51.750 COP por 1.000 páginas). Para documentos en formato nativo, la extracción es directa y sin costo adicional. Se recomienda digitalizar los documentos antes de la ingesta.
+> **Requisito de documentos:** Los PDFs se suben en su formato original (incluso con tablas complejas) — el sistema los convierte automáticamente a Markdown preservando la estructura. No se requiere preparación previa. Los PDFs escaneados (imágenes) necesitan OCR ([AWS Textract](https://docs.aws.amazon.com/textract/latest/dg/what-is.html)), recomendamos digitalizar a texto nativo antes de la ingesta. Todos los formatos (PDF, DOCX, MD, TXT) se unifican internamente a Markdown para mejor comprensión del LLM.
 
 El pipeline RAG tiene dos flujos:
 
-**Ingesta (offline/batch):** Los documentos pasan por [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) → [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) que extrae texto, divide en fragmentos y extrae metadatos. Luego se generan vectores ([embeddings](https://platform.openai.com/docs/guides/embeddings)) con Titan Embeddings V2 y se almacenan en [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) [pgvector](https://github.com/pgvector/pgvector) con índice [HNSW](https://github.com/pgvector/pgvector?tab=readme-ov-file#hnsw) para búsqueda rápida.
+**Ingesta (offline/batch):** Los documentos pasan por [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html):
+1. **Conversión a Markdown**: PDF y DOCX se transforman a Markdown (tablas, listas, títulos). TXT y MD se mantienen. El original se conserva intacto en S3.
+2. **Chunking semántico**: El Markdown se divide en fragmentos respetando la estructura (no se rompen tablas ni secciones).
+3. **Embeddings**: Se generan vectores con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html) y se almacenan en [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) [pgvector](https://github.com/pgvector/pgvector) con índice [HNSW](https://github.com/pgvector/pgvector?tab=readme-ov-file#hnsw).
+4. **Metadatos**: Cada chunk almacena el nombre del documento original, su versión, categoría y fecha de ingesta para poder citar la fuente en las respuestas.
+
+> **Costo del procesamiento de documentos:** El embedding de documentos es muy económico — [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html) cuesta ~$0.00002/1K tokens. Un documento de 10 páginas (~30K tokens) cuesta ~$0.0006 (~$2 COP) en embeddings. Incluso con ciclos de prueba (subir → eliminar → re-subir), el costo es marginal. El procesamiento (Markdown, chunking) se ejecuta en [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) y [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) — también de costo despreciable (~$0.001 por documento). El plan Estándar incluye procesamiento de hasta **100 documentos/mes** (nuevos o actualizaciones) dentro de la mensualidad. Excesos se facturan a $5.000 COP por documento adicional.
+>
+> **Definición de "documento":** Se considera **1 documento = 1 archivo subido**, independientemente de su número de páginas, tamaño en MB, o si contiene tablas, imágenes o texto. Un PDF de tarifas de 50 páginas cuenta como 1 documento, igual que un TXT de 1 página. Esto aplica tanto para cargas nuevas como para actualizaciones (reemplazar un archivo existente por una nueva versión cuenta como 1 documento adicional).
+
+> **Versiones y reemplazo:** Cuando se sube una nueva versión del mismo documento, el pipeline: (a) marca los chunks antiguos como obsoletos, (b) indexa los nuevos, (c) elimina los antiguos atómicamente. El reemplazo es inmediato — no hay periodo de convivencia ni respuestas con información mezclada.
 
 **Consulta (online/tiempo real):** La consulta del asesor pasa por reescritura (corrección ortográfica y expansión), revisa el caché semántico en [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html), y si no encuentra respuesta (cache MISS) ejecuta [búsqueda híbrida (BM25)](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-match-bool-prefix-query.html) + vectores + filtros), reordenamiento con [cross-encoder](https://www.sbert.net/examples/applications/cross-encoder/README.html), expansión padre-hijo, ensamblaje de contexto, y finalmente invoca [Claude Sonnet](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) para generar la respuesta vía streaming.
+
+> **Citación de fuentes (toggleable):** La respuesta del asistente puede incluir una nota al pie indicando de qué documento se obtuvo la información. Ej: "*Información obtenida del documento 'Plan Familiar Premium — Tarifas 2026' (subido el 15/03/2026)*". El administrador puede **activar o desactivar** esta funcionalidad desde el KB Admin Panel. Durante el piloto, se recomienda mantenerla activada para que los asesores verifiquen la fuente y reporten si un documento tiene información incorrecta — así se distingue entre un error del modelo y un error en el documento fuente.
 
 #### 3.2.4 Model Routing — Clasificador de Complejidad de Consulta
 
@@ -899,7 +910,7 @@ En este modo:
 
 **Pipeline de anonimización antes del LLM:** Antes de que cualquier consulta llegue a [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html), se ejecuta un pipeline que detecta datos personales (nombres, documentos, teléfonos, direcciones) mediante expresiones regulares y reconocimiento de entidades, los reemplaza con tokens anónimos ("Cliente-001", "60 años"), verifica que no haya fugas, y solo entonces envía la consulta anonimizada a Claude. Claude nunca recibe datos personales.
 
-> **Implementación:** Usamos **[Microsoft Presidio](https://microsoft.github.io/presidio/)** (open source, MIT, 8.8K estrellas) como librería Python. Corre en el RAG Service como paso previo a la llamada a Bedrock. No requiere servicios AWS adicionales — solo el cómputo del contenedor (ya presupuestado en [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)). Detecta 40+ tipos de entidades (nombres, CC, NIT, teléfonos, direcciones, emails, placas). Opcionalmente se puede usar [AWS Comprehend](https://docs.aws.amazon.com/comprehend/latest/dg/what-is.html) para PII como respaldo, pero Presidio es suficiente y no añade costos variables.
+> **Implementación y costo:** Usamos **[Microsoft Presidio](https://microsoft.github.io/presidio/)** (open source, licencia MIT, 8.8K estrellas) como librería Python. **100% gratuito** — sin costo de licencia, sin costo por documento ni por consulta. Corre en el RAG Service como paso previo a la llamada a Bedrock, dentro del mismo contenedor [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) ya presupuestado en las tablas de costos (no añade instancias adicionales ni servicios AWS extra). Detecta 40+ tipos de entidades (nombres, CC, NIT, teléfonos, direcciones, emails, placas). Opcionalmente se puede usar [AWS Comprehend](https://docs.aws.amazon.com/comprehend/latest/dg/what-is.html) para PII como respaldo, pero Presidio es suficiente sin costos variables.
 
 ### 5.4 Secret Management
 
@@ -1044,7 +1055,7 @@ gantt
 | Actividad | Entregable |
 |-----------|------------|
 | KB Admin Panel completo | Panel con todas las funcionalidades |
-| Chunk viewer, metadata editor, test queries | Admin puede gestionar documentos |
+| Listado, visor y descarga de documentos | Admin gestiona documentos desde el panel |
 | Pipeline de reindexación y versiones | Documentos actualizables sin downtime |
 | **Demo 8:** Admin gestiona toda la KB desde el panel | ✅ |
 
@@ -1090,8 +1101,8 @@ Después del Sprint 5 (MVP funcional en QA), se despliega a producción con 5-10
 > **Supuestos para costos LLM:** Las estimaciones de Bedrock asumen los siguientes volúmenes de conversación por asesor:
 > - **Cada asesor** realiza ~30 consultas/día en promedio*
 > - **Cada consulta** tiene ~30 palabras de input (~40 tokens) y recibe ~150 palabras de respuesta (~200 tokens)
-> - **Total por asesor:** ~1.200 consultas/mes (~600K tokens/mes)
-> - **100 asesores:** ~120.000 consultas/mes (~60M tokens/mes + ~10M por embeddings)
+> - **Total por asesor:** ~600 consultas/mes (~144K tokens/mes)
+> - **100 asesores:** ~60.000 consultas/mes (~14.4M tokens/mes + ~10M por embeddings)
 > - *\*Un asesor comercial de campo puede hacer 50-100 visitas/día pero no todas generan una consulta al sistema. Estimamos que ~30 visitas resultan en una interacción con el asistente. Este número se ajustará con datos reales de producción.*
 > - Los costos varían significativamente según el modelo usado (Sonnet vs Haiku) y la efectividad del caché y routing. Ver escenarios en [sección 3.2.4](#324-model-routing--clasificador-de-complejidad-de-consulta)
 >
@@ -1135,55 +1146,53 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Servicio | Configuración | Costo/mes (USD) | Costo/mes (COP) |
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, 100 MAU | $0.00 | $0 |
-| API Gateway HTTP | 500K requests/mes | $0.50 | ~$1.725 |
-| ECS Fargate | 3 servicios, 2-4 réplicas | ~$260 | ~$897.000 |
-| Aurora Serverless v2 | 2 ACU, 50 GB | ~$60 | ~$207.000 |
-| Bedrock (Claude Sonnet + Haiku) | 10K conversaciones/mes | ~$150 | ~$517.500 |
+| API Gateway HTTP | 3M requests/mes (60K consultas × ~50 llamadas internas) | $3.00 | ~$10.350 |
+| ECS Fargate | 3 servicios, 3-5 réplicas (mayor concurrencia) | ~$350 | ~$1.207.000 |
+| Aurora Serverless v2 | 3 ACU, 50 GB (más conexiones concurrentes) | ~$80 | ~$276.000 |
+| Bedrock (Claude Sonnet + Haiku) | 60K conversaciones/mes (6× respecto a estimación anterior) | ~$600 | ~$2.070.000 |
 | Titan Embeddings | 10K documentos/mes | ~$0.20 | ~$690 |
-| ElastiCache (Redis) | Serverless, 1 GB | ~$20 | ~$69.000 |
-| S3 + CloudFront (widget + KB Admin) | 10 GB, 50K requests | ~$5 | ~$17.250 |
+| ElastiCache (Redis) | Serverless, 2 GB (más volumen de caché) | ~$30 | ~$103.500 |
+| S3 + CloudFront (widget + KB Admin) | 20 GB, 100K requests | ~$7 | ~$24.150 |
 | Step Functions | Ingesta documentos + pipeline KB | ~$5 | ~$17.250 |
-| CloudWatch + X-Ray | Logs + trazas | ~$20 | ~$69.000 |
+| CloudWatch + X-Ray | Logs + trazas (6× más logs de Bedrock) | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
-| Lambda@Edge | 50K requests/mes | ~$0.50 | ~$1.725 |
+| Lambda@Edge | 300K requests/mes | ~$3.00 | ~$10.350 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$623/mes** | **~$2.149.000/mes** |
+| **Total Producción** | | **~$1.241/mes** | **~$4.281.500/mes** |
 | **+ QA (paralelo)** | | **~$124/mes** | **~$427.500/mes** |
-| **Total Prod + QA** | | **~$747/mes** | **~$2.576.500/mes** |
+| **Total Prod + QA** | | **~$1.365/mes** | **~$4.709.000/mes** |
 
 #### Escalado (500+ asesores)
 
 | Servicio | Configuración | Costo/mes (USD) | Costo/mes (COP) |
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, 500-1000 MAU | ~$3 | ~$10.350 |
-| API Gateway HTTP | 2.5M requests/mes | $2.50 | ~$8.625 |
-| ECS Fargate | 4 servicios, 3-5 réplicas + Spot | ~$400 | ~$1.380.000 |
-| Aurora Serverless v2 | 4 ACU, 100 GB HA | ~$150 | ~$517.500 |
-| Bedrock (Sonnet + Haiku routing) | 50K conversaciones/mes | ~$600 | ~$2.070.000 |
+| API Gateway HTTP | 15M requests/mes (300K consultas × ~50 llamadas internas) | $15.00 | ~$51.750 |
+| ECS Fargate | 4 servicios, 4-7 réplicas + Spot (mayor concurrencia) | ~$550 | ~$1.897.000 |
+| Aurora Serverless v2 | 6 ACU, 100 GB HA | ~$200 | ~$690.000 |
+| Bedrock (Sonnet + Haiku routing) | 300K conversaciones/mes (6× respecto a estimación anterior) | ~$3.000 | ~$10.350.000 |
 | Titan Embeddings | 50K documentos/mes | ~$1 | ~$3.450 |
-| ElastiCache (Redis) | Serverless, 5 GB | ~$50 | ~$172.500 |
-| S3 + CloudFront | 50 GB, 250K requests | ~$15 | ~$51.750 |
+| ElastiCache (Redis) | Serverless, 10 GB (5× más volumen de caché) | ~$80 | ~$276.000 |
+| S3 + CloudFront | 100 GB, 500K requests | ~$20 | ~$69.000 |
 | Step Functions | Ingesta + workflows | ~$20 | ~$69.000 |
-| CloudWatch + X-Ray | Logs + trazas | ~$60 | ~$207.000 |
+| CloudWatch + X-Ray | Logs + trazas (6× más logs) | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
-| Lambda@Edge | 500K requests/mes | ~$5 | ~$17.250 |
+| Lambda@Edge | 3M requests/mes | ~$15 | ~$51.750 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$1.436/mes** | **~$4.954.500/mes** |
+| **Total Escalado** | | **~$4.189/mes** | **~$14.452.000/mes** |
 | **+ QA (paralelo)** | | **~$124/mes** | **~$427.500/mes** |
-| **Total Esc + QA** | | **~$1.560/mes** | **~$5.382.000/mes** |
+| **Total Esc + QA** | | **~$4.313/mes** | **~$14.879.500/mes** |
 
 ### 7.2 Proyección Anual
 
-| Mes | Fase | Costo AWS/mes (COP) |
-|-----|------|---------------------|
 | Mes | Fase | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
 |-----|------|---------------------|---------------------|
-| 1-2 | Desarrollo + Fundación (sprints 1-2, solo QA) | ~$521.000/mes | ~$151/mes |
-| 3-4 | MVP parcial (sprints 3-4, QA + prod parcial) | ~$1.000.000/mes | ~$290/mes |
-| 5-6 | Piloto 5-10 asesores (sprints 5-6, QA + prod) | ~$1.800.000/mes | ~$522/mes |
-| 7-10 | Producción 100 asesores (QA + prod) | ~$2.576.500/mes | ~$747/mes |
-| 11-12 | Escalamiento 200-500 (QA + prod) | ~$5.382.000/mes | ~$1.560/mes |
-| **Total Año 1** | **Proyección AWS** | **~$26.000.000-34.000.000/año** | **~$7.500-9.800/año** |
+| 1-2 | Desarrollo + Fundación (sprints 1-2, solo QA) | ~$428.000/mes | ~$124/mes |
+| 3-4 | MVP parcial (sprints 3-4, QA + prod parcial) | ~$900.000/mes | ~$260/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6, QA + prod reducida) | ~$1.000.000/mes | ~$290/mes |
+| 7-10 | Producción 100 asesores (QA + prod) | ~$4.709.000/mes | ~$1.365/mes |
+| 11-12 | Escalamiento 200-500 (QA + prod) | ~$8.000.000/mes | ~$2.319/mes |
+| **Total Año 1** | **Proyección AWS** | **~$36.000.000-44.000.000/año** | **~$10.400-12.800/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1196,14 +1205,14 @@ Tasa de cambio: $1 USD = $3,450 COP
 
 | Estrategia | Ahorro (escenarios) | Implementación |
 |-----------|---------------------|---------------|
-| **Semantic Cache** (Redis) | **Optimista 68% / Normal 45% / Pesimista 25%** en costos LLM | Umbral similitud 0.92, ajustable |
+| **Semantic Cache** (Redis) | **Optimista 68% / Normal 45% / Pesimista 25%** en costos LLM | Umbral similitud 0.92, ajustable. **⚠️ Riesgo para el sector funerario:** Una consulta sobre "planes para contratar" es muy distinta a "acabo de perder un ser querido". El caché puede devolver respuestas contextualmente inapropiadas si el umbral de similitud es muy bajo. Se recomienda: (a) umbral conservador (≥0.95), (b) desactivar el caché para consultas con tono emocional detectado, (c) monitorear manualmente durante el piloto |
 | **Routing inteligente** (Sonnet ↔ Haiku) | **Optimista 30% / Normal 18% / Pesimista 0%** (si se desactiva por calidad) | Tareas simples → Haiku, complejas → Sonnet |
 | **[Fargate Spot](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html)** | Hasta 70% en compute de QA/pre-prod | Dev/QA y servicios no críticos |
 | **[Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html)** (1 año) | 30-50% en compute | Comprometerse a $50/mes (~$172.500 COP/mes) |
 | **[Batch Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)** | 50% en inferencia para procesamiento por lotes. Batch Bedrock permite enviar cientos de prompts en un archivo JSONL a [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html), [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) los procesa asincrónicamente (hasta 24h) a mitad de precio. Ideal para: ingestas nocturnas de documentos, generación de metadata, resúmenes automáticos de documentos, procesamiento de histórico de conversaciones | Procesamiento nocturno de documentos |
 | **[CloudFront free tier](https://aws.amazon.com/free/)** | 1TB/mes gratis | Aprovechar los primeros meses |
 | **[S3 Intelligent Tiering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html)** | Hasta 40% en storage | Datos de conversaciones con acceso variable |
-| **Escenarios de ahorro combinado total** | **Optimista: ~55% / Normal: ~35% / Pesimista: ~10%** sobre el costo total de infraestructura | **En números (prod 100 ases + QA):** Optimista ~$2.5M COP/mes → ~$1.1M; Normal ~$2.5M → ~$1.6M; Pesimista ~$2.5M → ~$2.25M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores |
+| **Escenarios de ahorro combinado total** | **Optimista: ~55% / Normal: ~35% / Pesimista: ~10%** sobre el costo total de infraestructura | **En números (prod 100 ases + QA):** base ~$4.7M COP/mes → Optimista ~$2.1M; Normal ~$3.1M; Pesimista ~$4.2M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores |
 
 ---
 
@@ -1291,23 +1300,25 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 |-----|----------|:----------------------------------------------------------:|-------|
 | **Mes 0** | Setup + primera mensualidad | **$15.000.000** (Op. 1) / **$18.500.000** (Op. 2) | La diferencia en setup (~$3.5M) es por desarrollar la app anfitriona + [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) en Op. 2 |
 | **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | Infraestructura QA operativa, primeras demos |
-| **Mes 2** | Mensualidad | **$7.500.000** | Desarrollo continúa (sprints 3-4) |
-| **Mes 3** | Mensualidad | **$7.500.000** | Sprint 5: MVP funcional en QA |
-| **Mes 4** | Mensualidad | **$7.500.000** | Sprint 6: Piloto 5-10 asesores |
+| **Mes 2** | Mensualidad | **$4.500.000** | Desarrollo continúa (sprints 3-4) |
+| **Mes 3** | Mensualidad | **$4.500.000** | Sprint 5: MVP funcional en QA |
+| **Mes 4** | Mensualidad | **$4.500.000** | Sprint 6: Piloto 5-10 asesores |
 | **Mes 5-12** | Mensualidad | **$7.500.000/mes** | Operación continua + mejoras |
-| **Total Año 1 (Op. 1)** | | **$15.000.000 + (11 × $7.500.000) = $97.500.000** | Setup + 11 mensualidades |
-| **Total Año 1 (Op. 2)** | | **$18.500.000 + (11 × $7.500.000) = $101.000.000** | Setup + 11 mensualidades |
+
+> **Mensualidad reducida durante desarrollo:** Durante los meses 2-4 no hay asesores reales consumiendo recursos de producción — solo infraestructura QA (~$428K-$1M/mes vs $4.7M/mes en producción). Ofrecemos una mensualidad reducida de **$4.500.000/mes** para los meses 2-4. A partir del mes 5 (producción real) aplica la mensualidad completa de $7.500.000. Esto reduce el año 1 en ~$9M.
+| **Total Año 1 (Op. 1)** | | **$15.000.000 + (3 × $4.500.000) + (8 × $7.500.000) = $88.500.000** | Setup + mensualidades |
+| **Total Año 1 (Op. 2)** | | **$18.500.000 + (3 × $4.500.000) + (8 × $7.500.000) = $92.000.000** | Setup + mensualidades |
 
 #### 8.2.3 Qué Pasa Si el Cliente Cancela Antes de los 12 Meses
 
-> **¿Cómo funciona la penalización?** Si el cliente cancela antes de los 12 meses, nosotros perdemos la inversión inicial (setup, desarrollo, capacidad reservada) y el ingreso esperado. La penalización es el **50% del valor de los meses restantes** del contrato. Por ejemplo, si el cliente cancela en el mes 3 (quedan 9 meses × $7.5M = $67.5M), paga $33.75M como compensación. Esto es estándar en servicios B2B con inversión inicial alta.
+> **¿Cómo funciona la penalización?** Si el cliente cancela antes de los 12 meses, nosotros perdemos la inversión inicial (setup, desarrollo, capacidad reservada) y el ingreso esperado. La penalización es el **50% del valor de los meses restantes** del contrato. Por ejemplo, si el cliente cancela en el mes 3 (quedan 9 meses: mes 4 a $4.5M + meses 5-12 a $7.5M = $64.5M), paga $32.25M como compensación. Esto es estándar en servicios B2B con inversión inicial alta.
 
 | Cancelación en mes | Ya pagó (COP) | Penalización (COP) | Total recuperado (COP) |
 |-------------------|---------------|-------------------|------------------------|
-| Mes 1 | $15.000.000 / $18.500.000 | 50% × 11 meses × $7.5M = **$41.250.000** | **$56.250.000 / $59.750.000** |
-| Mes 3 | $28.000.000 / $31.500.000 | 50% × 9 meses × $7.5M = **$33.750.000** | **$61.750.000 / $65.250.000** |
-| Mes 6 | $47.500.000 / $51.000.000 | 50% × 6 meses × $7.5M = **$22.500.000** | **$70.000.000 / $73.500.000** |
-| Mes 12 | $97.500.000 / $101.000.000 | $0 (completó el contrato) | **$97.500.000 / $101.000.000** |
+| Mes 1 | $15.000.000 / $18.500.000 | 50% × $73.5M (meses 2-12) = **$36.750.000** | **$51.750.000 / $55.250.000** |
+| Mes 3 | $24.000.000 / $27.500.000 | 50% × $64.5M (meses 4-12) = **$32.250.000** | **$56.250.000 / $59.750.000** |
+| Mes 6 | $43.500.000 / $47.000.000 | 50% × $45M (meses 7-12) = **$22.500.000** | **$66.000.000 / $69.500.000** |
+| Mes 12 | $88.500.000 / $92.000.000 | $0 (completó el contrato) | **$88.500.000 / $92.000.000** |
 
 #### 8.2.4 Inversión Inicial (Setup) — Incluido en el Mes 0
 
@@ -1330,10 +1341,10 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 | Plan | Conversaciones/mes | Precio mensual (COP) | Costo AWS estimado (COP) | Ideal para |
 |------|-------------------|:--------------------:|:------------------------:|------------|
-| **Básico** | Hasta 100 | **$5.000.000 - $6.000.000** | ~$1.5M - $2M | Piloto, < 10 asesores |
-| **Estándar** | Hasta 1.000 | **$7.500.000** | ~$3.5M | Producción, ~100 asesores |
-| **Premium** | Hasta 5.000 | **$10.000.000 - $12.000.000** | ~$5M - $7M | Escalado, ~500 asesores |
-| **Ilimitado** | Sin límite | **$15.000.000 - $18.000.000** | ~$6M - $10M | Gran volumen |
+| **Básico** | Hasta 5.000 | **$5.000.000 - $6.000.000** | ~$1.5M - $2M | Piloto, < 10 asesores |
+| **Estándar** | Hasta 60.000 | **$7.500.000** | ~$3.5M | Producción, ~100 asesores |
+| **Premium** | Hasta 300.000 | **$10.000.000 - $12.000.000** | ~$7M - $10M | Escalado, ~500 asesores |
+| **Ilimitado** | Sin límite | **$15.000.000 - $18.000.000** | ~$10M - $15M | Gran volumen |
 
 > **¿Qué incluye la mensualidad?** Infraestructura AWS (producción + QA), mantenimiento de microservicios, soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.7), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
 
@@ -1347,16 +1358,18 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 | Componente | Costo mensual (COP) |
 |------------|:-------------------:|
-| Infraestructura AWS (prod 100 ases + QA + buffer 15%) | ~$2.800.000 |
+| Infraestructura AWS (prod 100 ases + QA + buffer 15%) | ~$5.415.000 |
 | Dominio + CDN + SSL/TLS | ~$100.000 |
 | Mantenimiento y soporte (horario laboral, sin límite de horas) | ~$1.800.000 |
 | Monitoreo + actualizaciones de seguridad | ~$500.000 |
 | Gestión de KB Admin + pipeline de ingesta | ~$500.000 |
-| **Subtotal costo** | **~$5.700.000** |
-| Margen de servicio (~12-24%) | ~$800.000 - $1.800.000 |
+| **Subtotal costo base** | **~$8.315.000** |
+| Ahorro por optimizaciones (ver sección 6 — escenario Normal ~35%) | ~$2.910.000 |
+| **Subtotal costo con optimización** | **~$5.405.000** |
+| Margen de servicio (~28%) | ~$2.095.000 |
 | **Precio al cliente** | **$7.500.000** |
 
-> El precio exacto se fija según el plan contratado (tabla 8.2.5). Para el plan Estándar, el precio es $7.500.000, que ya incluye un margen de servicio del ~24% sobre los costos AWS y operativos estimados.
+> El precio se fija según el plan contratado (tabla 8.2.5). Para el plan Estándar, el precio es **$7.500.000**, que asume escenario de optimización Normal (~35% de ahorro sobre costos base de infraestructura) y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). Si el volumen de consultas supera las 60K/mes, el escenario de optimización resulta menor al estimado, o se procesan más de 100 documentos/mes, el precio se ajusta en la renovación del contrato.
 
 #### 8.2.7 Excedentes y Penalizaciones
 
@@ -1403,8 +1416,8 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 |---------|----------------------|:-----------------------------------:|
 | **Inversión inicial** | $48M (todo desarrollo) | **$15M** (Op. 1) / **$18.5M** (Op. 2) |
 | **Costo mensual** | $0 (solo desarrollo) | **$7.500.000/mes** (único para ambas opciones) |
-| **Costo año 1 total** | ~$54M + AWS ~$8M = **~$62M** | **$97.5M** (Op. 1) / **$101M** (Op. 2) |
-| **Costo año 2+** | AWS: ~$12M + soporte externo: ~$108M = **~$120M/año** | **$90M/año** |
+| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$25M = **~$73M** | **$88.5M** (Op. 1) / **$92M** (Op. 2) |
+| **Costo año 2+** | AWS: ~$56M + soporte externo: ~$108M = **~$164M/año** | **$90M/año** |
 | **App anfitriona** | ❌ A cargo del cliente | ✅ Incluida en Op. 2 / ❌ A cargo del cliente en Op. 1 |
 | **Auth / Login** | ❌ A cargo del cliente | ✅ Nosotros (Op. 2) / ❌ A cargo del cliente (Op. 1) |
 | **Soporte continuo** | ❌ No incluido | ✅ Incluido |

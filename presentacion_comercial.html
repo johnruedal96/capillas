@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capillas de la Fe — Asesor Comercial Aumentado con IA</title>
+<link href="https://fonts.googleapis.com/css2?family=League+Gothic&family=Figtree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #080e1a; }
+  .viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #080e1a; }
+  .stage {
+    position: relative; width: 1920px; height: 1080px; flex-shrink: 0;
+    transform-origin: center center; overflow: hidden;
+    background: linear-gradient(160deg, #0a1628 0%, #0f1f3a 40%, #162a4a 100%);
+    font-family: 'Figtree', sans-serif; color: #e8e0d4;
+  }
+  .viewport > .stage { --scale: min(calc(100vw / 1920), calc(100vh / 1080)); transform: scale(var(--scale)); }
+  .bg-pattern { position: absolute; inset: 0; background-image: radial-gradient(ellipse at 80% 10%, rgba(201, 169, 78, 0.07) 0%, transparent 50%), radial-gradient(ellipse at 20% 90%, rgba(201, 169, 78, 0.04) 0%, transparent 50%); pointer-events: none; }
+  .grid-overlay { position: absolute; inset: 0; background-image: linear-gradient(rgba(201, 169, 78, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(201, 169, 78, 0.025) 1px, transparent 1px); background-size: 80px 80px; pointer-events: none; }
+  .accent-line { position: absolute; top: 0; left: 100px; width: 3px; height: 100%; background: linear-gradient(180deg, rgba(201, 169, 78, 0.5), rgba(201, 169, 78, 0.15) 50%, transparent 90%); border-radius: 2px; pointer-events: none; }
+  .top-rule { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, rgba(201, 169, 78, 0.4) 30%, rgba(201, 169, 78, 0.4) 70%, transparent); pointer-events: none; }
+  .page-num { position: absolute; bottom: 36px; right: 80px; font-family: 'Figtree', sans-serif; font-size: 12px; color: rgba(201, 169, 78, 0.25); letter-spacing: 2px; pointer-events: none; }
+  .nav-hint { position: absolute; bottom: 36px; left: 160px; font-family: 'Figtree', sans-serif; font-size: 11px; color: rgba(201, 169, 78, 0.12); letter-spacing: 2px; pointer-events: none; }
+  .slide { position: absolute; inset: 0; padding: 64px 120px 60px 160px; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.4s ease, visibility 0.4s ease; }
+  .slide.active { opacity: 1; visibility: visible; pointer-events: auto; }
+  .overline { font-family: 'Figtree', sans-serif; font-size: 11px; font-weight: 600; color: #c9a94e; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 4px; }
+  h1 { font-family: 'League Gothic', sans-serif; font-size: 100px; font-weight: 400; color: #f0e6d8; line-height: 0.92; text-transform: uppercase; letter-spacing: 2px; }
+  h1 .gold { color: #c9a94e; }
+  h2 { font-family: 'League Gothic', sans-serif; font-size: 52px; font-weight: 400; color: #f0e6d8; line-height: 1; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  h2 .gold { color: #c9a94e; }
+  .label { font-family: 'Figtree', sans-serif; font-size: 11px; font-weight: 600; color: rgba(201, 169, 78, 0.4); letter-spacing: 2px; text-transform: uppercase; }
+  .note { font-family: 'Figtree', sans-serif; font-size: 12px; font-weight: 300; color: rgba(232, 224, 212, 0.3); font-style: italic; margin-top: 3px; }
+
+  .card { background: rgba(201, 169, 78, 0.03); border: 1px solid rgba(201, 169, 78, 0.08); border-radius: 10px; padding: 16px 20px; backdrop-filter: blur(2px); }
+  .card .card-title { font-family: 'Figtree', sans-serif; font-size: 13px; font-weight: 600; color: #c9a94e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .card p { font-family: 'Figtree', sans-serif; font-size: 13px; font-weight: 300; color: rgba(232, 224, 212, 0.65); line-height: 1.45; }
+
+  .card-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card-grid-4 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .hbar { margin-bottom: 8px; }
+  .hbar .hbar-label { display: flex; justify-content: space-between; font-family: 'Figtree', sans-serif; font-size: 13px; color: rgba(232,224,212,0.65); margin-bottom: 2px; }
+  .hbar .hbar-label .highlight { color: #c9a94e; font-weight: 500; }
+  .hbar .hbar-track { height: 16px; border-radius: 4px; background: rgba(201, 169, 78, 0.08); overflow: hidden; }
+  .hbar .hbar-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #c9a94e, rgba(201, 169, 78, 0.4)); display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-family: 'Figtree', sans-serif; font-size: 10px; font-weight: 600; color: #0a1628; min-width: 28px; }
+
+  .tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-family: 'Figtree', sans-serif; font-size: 13px; }
+  .tbl th { text-align: left; padding: 7px 10px; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: rgba(201, 169, 78, 0.45); border-bottom: 1px solid rgba(201, 169, 78, 0.12); }
+  .tbl td { padding: 7px 10px; color: rgba(232, 224, 212, 0.7); font-weight: 300; border-bottom: 1px solid rgba(201, 169, 78, 0.04); }
+  .tbl tr.recommended td { background: rgba(201, 169, 78, 0.06); color: #f0e6d8; }
+  .tbl tr.recommended td:first-child { border-left: 2px solid #c9a94e; border-radius: 4px 0 0 4px; }
+  .tbl td strong { color: #f0e6d8; font-weight: 500; }
+  .tbl .badge { display: inline-block; background: rgba(201, 169, 78, 0.15); color: #c9a94e; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 1px; }
+  .tbl .cross { color: rgba(232,224,212,0.2); }
+
+  .mermaid-wrap { background: rgba(0,0,0,0.2); border-radius: 10px; padding: 6px; border: 1px solid rgba(201, 169, 78, 0.05); display: flex; align-items: center; justify-content: center; min-height: 120px; }
+  .mermaid-wrap svg { max-width: 100%; max-height: 240px; }
+  .mw-full { min-height: 160px; }
+  .mw-full svg { max-height: 280px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center; }
+  .col-center { display: flex; flex-direction: column; justify-content: center; }
+
+  .layout-stack { display: flex; flex-direction: column; flex: 1; gap: 12px; }
+  .layout-stack .mermaid-wrap { flex-shrink: 0; }
+  .layout-stack .cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1; }
+
+  .icon-box { text-align: center; padding: 12px 8px; background: rgba(201, 169, 78, 0.03); border: 1px solid rgba(201, 169, 78, 0.06); border-radius: 10px; }
+  .icon-box .ib-num { font-family: 'League Gothic', sans-serif; font-size: 38px; color: #c9a94e; line-height: 1; }
+  .icon-box .ib-label { font-family: 'Figtree', sans-serif; font-size: 11px; color: rgba(232,224,212,0.5); margin-top: 2px; }
+  .icon-box .ib-sub { font-family: 'Figtree', sans-serif; font-size: 10px; color: rgba(232,224,212,0.25); margin-top: 1px; }
+
+  .highlight-box { background: rgba(201, 169, 78, 0.04); border: 1px solid rgba(201, 169, 78, 0.1); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 14px; }
+  .highlight-box .hb-icon { font-size: 24px; }
+  .highlight-box .hb-text { font-family: 'Figtree', sans-serif; font-size: 13px; color: rgba(232,224,212,0.7); line-height: 1.4; }
+  .highlight-box .hb-text strong { color: #f0e6d8; }
+
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.35s ease, transform 0.35s ease; }
+  .slide.active .reveal { opacity: 1; transform: translateY(0); }
+  .slide.active .r1 { transition-delay: 0.05s; } .slide.active .r2 { transition-delay: 0.12s; } .slide.active .r3 { transition-delay: 0.2s; } .slide.active .r4 { transition-delay: 0.28s; } .slide.active .r5 { transition-delay: 0.36s; } .slide.active .r6 { transition-delay: 0.44s; }
+  @media (prefers-reduced-motion: reduce) { .slide, .reveal { transition: none !important; } .slide.active .reveal { opacity: 1; transform: none; } }
+
+  .title-slide { justify-content: center; padding-bottom: 120px; }
+  .title-slide .title-main { font-size: 130px; margin-bottom: 4px; }
+  .title-slide .title-sub { font-family: 'League Gothic', sans-serif; font-size: 36px; color: rgba(201, 169, 78, 0.4); text-transform: uppercase; letter-spacing: 6px; margin-top: 8px; }
+  .title-slide .title-desc { font-family: 'Figtree', sans-serif; font-size: 18px; font-weight: 300; color: rgba(232, 224, 212, 0.45); margin-top: 16px; max-width: 560px; line-height: 1.5; }
+  .title-slide .date { font-family: 'Figtree', sans-serif; font-size: 11px; color: rgba(201, 169, 78, 0.18); margin-top: 32px; letter-spacing: 1px; }
+  .closing-slide { justify-content: center; align-items: center; text-align: center; }
+  .closing-slide h1 { font-size: 100px; }
+  .closing-slide .closing-body { max-width: 560px; margin-top: 14px; font-family: 'Figtree', sans-serif; font-size: 18px; font-weight: 300; color: rgba(232, 224, 212, 0.45); line-height: 1.5; }
+
+  .cost-tier {
+    background: rgba(201, 169, 78, 0.03); border: 1px solid rgba(201, 169, 78, 0.08); border-radius: 10px; padding: 14px 16px;
+    display: flex; flex-direction: column;
+  }
+  .cost-tier .ct-title { font-family: 'Figtree', sans-serif; font-size: 12px; font-weight: 600; color: #c9a94e; text-transform: uppercase; letter-spacing: 1px; }
+  .cost-tier .ct-price { font-family: 'League Gothic', sans-serif; font-size: 36px; color: #f0e6d8; line-height: 1; margin: 4px 0; }
+  .cost-tier .ct-price .usd { font-family: 'Figtree', sans-serif; font-size: 14px; color: rgba(232,224,212,0.3); font-weight: 300; }
+  .cost-tier .ct-desc { font-family: 'Figtree', sans-serif; font-size: 12px; color: rgba(232,224,212,0.45); }
+  .cost-tier .ct-users { font-family: 'Figtree', sans-serif; font-size: 11px; color: rgba(201, 169, 78, 0.3); margin-top: 2px; }
+  .cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+</style>
+</head>
+<body>
+
+<div class="viewport">
+  <div class="stage" id="stage">
+    <div class="bg-pattern"></div>
+    <div class="grid-overlay"></div>
+    <div class="accent-line"></div>
+    <div class="top-rule"></div>
+
+    <!-- SLIDE 1 — TITLE -->
+    <div class="slide title-slide active" data-slide="1">
+      <div class="overline reveal r1">Capillas de la Fe</div>
+      <h1 class="title-main reveal r2">Tecnología<br><span class="gold">con propósito</span></h1>
+      <div class="title-sub reveal r3">Asesor Comercial Aumentado con IA</div>
+      <p class="title-desc reveal r4">IA que potencia tu equipo — sin reemplazar<br>lo más valioso: la conversación humana.</p>
+      <div class="date reveal r5">Junio 2026</div>
+    </div>
+
+    <!-- SLIDE 2 — ESTRUCTURA -->
+    <div class="slide" data-slide="2">
+      <div class="overline reveal r1">Arquitectura</div>
+      <h2 class="reveal r2">Dos canales, <span class="gold">un solo cerebro</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart TB
+    CHAT[💬 Chat Comercial]
+    ADMIN[📋 Panel de Gestión]
+    CEREBRO[🧠 Sistema Central]
+    CHAT -->|Consulta| CEREBRO
+    ADMIN -->|Alimenta| CEREBRO
+    CEREBRO -->|Responde| CHAT
+            </pre>
+          </div>
+        </div>
+        <div class="col-center">
+          <div class="card" style="margin-bottom:8px;">
+            <div class="card-title">Chat Comercial</div>
+            <p>El asesor abre el widget y conversa con la IA. Obtiene planes, argumentos y manejo de objeciones al instante.</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Panel de Gestión</div>
+            <p>El equipo operativo sube documentos. El sistema los procesa solo y la IA aprende al instante.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 3 — SEGURIDAD -->
+    <div class="slide" data-slide="3">
+      <div class="overline reveal r1">Protección</div>
+      <h2 class="reveal r2">Comunicación <span class="gold">blindada</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart LR
+    W[💻 Widget Asesor] 
+    T[🔒 Túnel cifrado AES-256]
+    B[☁️ Backend Seguro]
+    H[👤 Intruso 🚫 Bloqueado]
+    W <-->|Cifrado| T
+    T <-->|Cifrado| B
+    H -.->|Intenta| T
+    T -->|❌ Rechazado| H
+            </pre>
+          </div>
+        </div>
+        <div class="col-center">
+          <div class="card" style="margin-bottom:6px;">
+            <div class="card-title">Cifrado de punta a punta</div>
+            <p>Cada mensaje viaja cifrado. Nadie puede leerlo ni modificarlo. El mismo estándar que usan los bancos.</p>
+          </div>
+          <div class="card" style="margin-bottom:6px;">
+            <div class="card-title">Detección automática</div>
+            <p>Si alguien intenta alterar un mensaje, el sistema lo detecta y lo rechaza automáticamente.</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Datos cifrados en reposo</div>
+            <p>Toda la información almacenada está cifrada. Ni el proveedor de nube puede leer los datos de Capillas.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 4 — NUBE VS SERVIDORES -->
+    <div class="slide" data-slide="4">
+      <div class="overline reveal r1">Infraestructura</div>
+      <h2 class="reveal r2">¿Servidores físicos o <span class="gold">nube?</span></h2>
+      <div class="reveal r3" style="margin-top:4px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+          <div>
+            <div class="label" style="margin-bottom:4px;">🖥️ Servidores tradicionales</div>
+            <div class="hbar"><div class="hbar-label"><span>Compra de equipos</span><span class="highlight">$$$$$</span></div><div class="hbar-track"><div class="hbar-fill" style="width:92%;">Inversión inicial alta</div></div></div>
+            <div class="hbar"><div class="hbar-label"><span>Mantenimiento técnico</span><span class="highlight">$$$</span></div><div class="hbar-track"><div class="hbar-fill" style="width:70%;">Costo recurrente</div></div></div>
+            <div class="hbar"><div class="hbar-label"><span>Electricidad + clima</span><span class="highlight">$$</span></div><div class="hbar-track"><div class="hbar-fill" style="width:45%;">24/7</div></div></div>
+            <div class="hbar"><div class="hbar-label"><span>Si se dañan</span><span class="highlight" style="color:rgba(232,80,80,0.6);">Sistema caído</span></div><div class="hbar-track" style="background:rgba(232,80,80,0.06);"><div class="hbar-fill" style="width:30%;background:linear-gradient(90deg,#e85050,rgba(232,80,80,0.3));">Sin respaldo</div></div></div>
+            <div class="note">* Valores estimados promedio del mercado colombiano. Referencia general.</div>
+          </div>
+          <div>
+            <div class="label" style="color:#c9a94e;margin-bottom:4px;">☁️ Nube (AWS)</div>
+            <div class="hbar"><div class="hbar-label"><span>Pago por uso mensual*</span><span class="highlight">$</span></div><div class="hbar-track"><div class="hbar-fill" style="width:28%;">~$1.8M COP/mes</div></div></div>
+            <div class="hbar"><div class="hbar-label"><span>Mantenimiento</span><span class="highlight">$0</span></div><div class="hbar-track"><div class="hbar-fill" style="width:4%;">$0</div></div></div>
+            <div class="hbar"><div class="hbar-label"><span>Escalabilidad</span><span class="highlight" style="color:#7ab07e;">Automática</span></div><div class="hbar-track" style="background:rgba(122,176,126,0.06);"><div class="hbar-fill" style="width:100%;background:linear-gradient(90deg,#7ab07e,rgba(122,176,126,0.3));">Sin límites</div></div></div>
+            <div class="hbar"><div class="hbar-label"><span>Seguridad</span><span class="highlight" style="color:#7ab07e;">99.5% disponible</span></div><div class="hbar-track" style="background:rgba(122,176,126,0.06);"><div class="hbar-fill" style="width:100%;background:linear-gradient(90deg,#7ab07e,rgba(122,176,126,0.3));">Profesional</div></div></div>
+            <div class="note">* Costo mensual AWS para ~100 asesores en producción. Incluye todos los servicios de infraestructura, IA y monitoreo.</div>
+          </div>
+        </div>
+      </div>
+      <div class="two-col reveal r4" style="margin-top:6px;gap:12px;">
+        <div class="card" style="padding:10px 14px;">
+          <div class="card-title">Con la nube no hay inversión inicial</div>
+          <p>No compras servidores, no pagas electricidad, no contratas técnicos. Pagas solo por los servicios que usas cada mes.</p>
+        </div>
+        <div class="card" style="padding:10px 14px;">
+          <div class="card-title">Escalabilidad sin obras</div>
+          <p>Si mañana Capillas crece de 100 a 500 asesores, la nube se adapta automáticamente. No hay que comprar ni instalar nada nuevo.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 5 — COMPARATIVA AWS -->
+    <div class="slide" data-slide="5">
+      <div class="overline reveal r1">Selección estratégica</div>
+      <h2 class="reveal r2">Amazon Web Services: <span class="gold">la mejor relación costo-beneficio</span></h2>
+      <div class="reveal r3" style="margin-top:6px;">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:16%;">Proveedor</th>
+              <th style="width:20%;">Costo/mes*</th>
+              <th style="width:20%;">Presencia LATAM</th>
+              <th style="width:20%;">Ecosistema IA</th>
+              <th style="width:14%;">Madurez</th>
+              <th style="width:10%;">Veredicto</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="recommended">
+              <td><strong>AWS</strong> <span class="badge">Elegido</span></td>
+              <td><strong>~$1.8M COP</strong></td>
+              <td>✅ Sao Paulo<br><span style="font-size:10px;color:rgba(232,224,212,0.35);">~30ms desde Colombia</span></td>
+              <td>✅ Bedrock, Claude, Titan</td>
+              <td>✅ Maduro</td>
+              <td><strong style="color:#c9a94e;">⭐ GANA</strong></td>
+            </tr>
+            <tr>
+              <td>Azure</td>
+              <td>~$2.76M COP</td>
+              <td>✅ Brazil South</td>
+              <td>✅ OpenAI GPT-4o</td>
+              <td>✅ Maduro</td>
+              <td><span class="cross">✗</span> 50% más caro</td>
+            </tr>
+            <tr>
+              <td>Google Cloud</td>
+              <td>~$1.38M COP</td>
+              <td>⚠️ Sin servidor directo</td>
+              <td>✅ Gemini + Vertex</td>
+              <td>✅ Maduro</td>
+              <td><span class="cross">✗</span> Sin ventaja clave</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note">* Costos estimados para ~100 asesores en producción. Basado en precios públicos AWS 2025-2026. Tasa: $1 USD = $3,450 COP. La cifra de AWS incluye infraestructura, IA y monitoreo.</div>
+      </div>
+      <div class="two-col reveal r4" style="margin-top:8px;gap:12px;">
+        <div class="card" style="padding:8px 14px;">
+          <div class="card-title">💰 Costo más bajo en componentes críticos</div>
+          <p>AWS es hasta 35% más barato que Azure en los servicios que Capillas necesita: base de datos vectorial, cómputo y autenticación.</p>
+        </div>
+        <div class="card" style="padding:8px 14px;">
+          <div class="card-title">🌎 Presencia LATAM y ecosistema IA</div>
+          <p>Servidores en Sao Paulo (~30ms desde Colombia). Claude disponible directamente en Bedrock, sin intermediarios ni configuraciones complejas.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 6 — COSTOS (NUEVO) -->
+    <div class="slide" data-slide="6">
+      <div class="overline reveal r1">Solo infraestructura nube</div>
+      <h2 class="reveal r2">¿Cuánto cuesta <span class="gold">AWS por mes?</span></h2>
+      <div class="reveal r3" style="margin-top:6px;">
+        <div class="cost-grid">
+          <div class="cost-tier">
+            <div class="ct-title">🧪 MVP / Desarrollo</div>
+            <div class="ct-price">~$314K <span class="usd">($91 USD)</span></div>
+            <div class="ct-desc">1-2 microservicios, instancias pequeñas</div>
+            <div class="ct-users">👤 &lt; 10 asesores · Solo ambiente QA</div>
+          </div>
+          <div class="cost-tier">
+            <div class="ct-title">🔬 QA / Staging</div>
+            <div class="ct-price">~$255K <span class="usd">($74 USD)</span></div>
+            <div class="ct-desc">Ambiente de pruebas separado</div>
+            <div class="ct-users">➕ Adicional a producción · Servicios reducidos</div>
+          </div>
+          <div class="cost-tier" style="border-color:rgba(201,169,78,0.2);background:rgba(201,169,78,0.05);">
+            <div class="ct-title">🚀 Producción — 100 asesores</div>
+            <div class="ct-price">~$1.8M <span class="usd">($525 USD)</span></div>
+            <div class="ct-desc">4-5 microservicios, alta disponibilidad parcial</div>
+            <div class="ct-users">👥 100 asesores · Incluye IA + infraestructura</div>
+          </div>
+          <div class="cost-tier">
+            <div class="ct-title">📈 Escalado — 500+ asesores</div>
+            <div class="ct-price">~$4.5M <span class="usd">($1,306 USD)</span></div>
+            <div class="ct-desc">Alta disponibilidad completa, múltiples zonas</div>
+            <div class="ct-users">👥 500+ asesores · Escalamiento automático</div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:6px;">* Solo costos de infraestructura AWS. No incluye desarrollo, soporte, mantenimiento ni margen de servicio. Tasa: $1 USD = $3,450 COP.</div>
+      </div>
+      <div class="reveal r4" style="margin-top:8px;">
+        <div class="highlight-box" style="padding:10px 16px;">
+          <div class="hb-icon">💡</div>
+          <div class="hb-text">El costo de producción para <strong>100 asesores (~$1.8M COP/mes)</strong> incluye: 4 microservicios en Fargate, base de datos Aurora con pgvector, caché Redis, modelo Claude en Bedrock, CDN, cifrado, monitoreo y almacenamiento. <strong>No hay costos ocultos.</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 7 — CACHÉ -->
+    <div class="slide" data-slide="7">
+      <div class="overline reveal r1">Ahorro inteligente</div>
+      <h2 class="reveal r2">Caché semántico: <span class="gold">-68% en IA</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart TB
+    Q[💬 Asesor pregunta]
+    CACHE{¿Ya está<br/>en caché?}
+    HIT[⚡ Respuesta inmediata<br/>$0 · milisegundos]
+    MISS[🧠 IA genera respuesta]
+    SAVE[💾 Guarda en caché]
+    Q --> CACHE
+    CACHE -->|Sí| HIT
+    CACHE -->|No| MISS
+    MISS --> SAVE
+            </pre>
+          </div>
+        </div>
+        <div class="col-center" style="gap:6px;">
+          <div class="highlight-box">
+            <div class="hb-icon">💰</div>
+            <div class="hb-text">El sistema recuerda preguntas parecidas. Si dos asesores preguntan algo similar, la respuesta se entrega al instante <strong>sin</strong> que la IA tenga que "pensar" de nuevo.</div>
+          </div>
+          <div class="card-grid-2" style="margin-top:0;">
+            <div style="background:rgba(201,169,78,0.03);border:1px solid rgba(201,169,78,0.08);border-radius:10px;padding:12px;text-align:center;">
+              <div style="font-family:'League Gothic',sans-serif;font-size:36px;color:#7ab07e;">68%</div>
+              <div style="font-family:'Figtree',sans-serif;font-size:11px;color:rgba(232,224,212,0.4);">menos llamadas a la IA</div>
+            </div>
+            <div style="background:rgba(201,169,78,0.03);border:1px solid rgba(201,169,78,0.08);border-radius:10px;padding:12px;text-align:center;">
+              <div style="font-family:'League Gothic',sans-serif;font-size:36px;color:#c9a94e;">&lt;10ms</div>
+              <div style="font-family:'Figtree',sans-serif;font-size:11px;color:rgba(232,224,212,0.4);">respuesta en caché</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 8 — ROUTING -->
+    <div class="slide" data-slide="8">
+      <div class="overline reveal r1">Inteligencia eficiente</div>
+      <h2 class="reveal r2">Cada pregunta gasta <span class="gold">justo lo necesario</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart TB
+    Q[💬 ¿Qué pregunta?]
+    R{📋 Reglas rápidas}
+    H[➡ Modelo económico<br/>~$3.5K COP · 0.5s]
+    C{🤔 Clasificador}
+    S[➡ Modelo completo<br/>~$10K COP · 1s]
+    Q --> R
+    R -->|Simple| H
+    R -->|No claro| C
+    C -->|Simple| H
+    C -->|Compleja| S
+            </pre>
+          </div>
+        </div>
+        <div class="col-center" style="gap:6px;">
+          <div class="highlight-box">
+            <div class="hb-icon">🎯</div>
+            <div class="hb-text"><strong>Costo promedio baja de $100 a ~$50-65 COP</strong> por consulta. El asesor nunca nota la diferencia.</div>
+          </div>
+          <div class="card-grid-2" style="margin-top:0;">
+            <div style="background:rgba(232,80,80,0.04);border:1px solid rgba(232,80,80,0.08);border-radius:10px;padding:10px;text-align:center;">
+              <div style="font-family:'Figtree',sans-serif;font-size:10px;color:rgba(232,224,212,0.35);text-transform:uppercase;letter-spacing:1px;">Sin routing</div>
+              <div style="font-family:'League Gothic',sans-serif;font-size:32px;color:rgba(232,224,212,0.25);">$100</div>
+              <div style="font-family:'Figtree',sans-serif;font-size:10px;color:rgba(232,224,212,0.25);">todo al modelo caro</div>
+            </div>
+            <div style="background:rgba(201,169,78,0.04);border:1px solid rgba(201,169,78,0.1);border-radius:10px;padding:10px;text-align:center;">
+              <div style="font-family:'Figtree',sans-serif;font-size:10px;color:rgba(201,169,78,0.4);text-transform:uppercase;letter-spacing:1px;">Con routing</div>
+              <div style="font-family:'League Gothic',sans-serif;font-size:32px;color:#c9a94e;">$50</div>
+              <div style="font-family:'Figtree',sans-serif;font-size:10px;color:rgba(232,224,212,0.25);">justo lo necesario</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 9 — PRIVACIDAD -->
+    <div class="slide" data-slide="9">
+      <div class="overline reveal r1">Protección de datos</div>
+      <h2 class="reveal r2">Los datos del cliente <span class="gold">nunca se exponen</span></h2>
+      <div class="layout-stack reveal r3" style="margin-top:4px;flex:1;">
+        <div class="mermaid-wrap" style="min-height:150px;max-height:170px;">
+          <pre class="mermaid">
+flowchart LR
+    E[📝 Consulta original<br/>'Juan Pérez, 45 años...']
+    F[🔍 Filtro Ley 1581]
+    S[✅ Consulta anónima<br/>'Cliente 45 años...']
+    IA[🧠 Claude nunca ve<br/>datos personales]
+    E --> F --> S --> IA
+          </pre>
+        </div>
+        <div class="cards-row" style="flex:1;">
+          <div class="card">
+            <div class="card-title">Cumplimiento Ley 1581 de 2012</div>
+            <p>La ley colombiana exige proteger los datos personales. El sistema lo hace automáticamente. El asesor no tiene que preocuparse.</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Filtro automático de datos sensibles</div>
+            <p>Nombres, documentos, teléfonos y direcciones se eliminan antes de llegar a la IA. Claude nunca recibe información personal de los clientes.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 10 — LOGIN -->
+    <div class="slide" data-slide="10">
+      <div class="overline reveal r1">Acceso</div>
+      <h2 class="reveal r2">Dos formas de <span class="gold">ingresar</span></h2>
+      <div class="two-col reveal r3" style="margin-top:8px;gap:20px;">
+        <div class="card" style="padding:20px 24px;height:fit-content;">
+          <div style="font-size:28px;margin-bottom:4px;">🔑</div>
+          <div class="card-title">Escenario A — Capillas ya tiene login</div>
+          <p style="font-size:14px;margin-top:4px;">El widget se integra con el sistema de usuarios que ya tienen (intranet, CRM). Los asesores usan su misma cuenta. <strong>Sin crear nuevas contraseñas.</strong></p>
+          <div style="margin-top:6px;font-size:11px;color:rgba(201,169,78,0.35);">⟶ Ideal si ya tienen plataforma</div>
+        </div>
+        <div class="card" style="padding:20px 24px;height:fit-content;border-color:rgba(201,169,78,0.15);">
+          <div style="font-size:28px;margin-bottom:4px;">🆕</div>
+          <div class="card-title">Escenario B — Login incluido</div>
+          <p style="font-size:14px;margin-top:4px;">El sistema incluye su propio login empresarial. Cada asesor tiene su usuario y contraseña. Se integra con correo corporativo si se desea.</p>
+          <div style="margin-top:6px;font-size:11px;color:rgba(201,169,78,0.35);">⟶ Ideal si empiezan desde cero</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 11 — SERVERLESS -->
+    <div class="slide" data-slide="11">
+      <div class="overline reveal r1">Pago por uso</div>
+      <h2 class="reveal r2">En horas muertas, <span class="gold">el costo se reduce</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart TB
+    D[☀️ Día laboral<br/>100 asesores activos]
+    N[🌙 Noche / finde<br/>Sin actividad]
+    A[⚡ Servicios activos<br/>• ECS: escalado normal<br/>• Aurora: activa<br/>• IA: consultas en vivo]
+    R[💤 Servicios reducidos<br/>• ECS: mínimas réplicas<br/>• Aurora: 0.5 ACU<br/>• IA: sin consultas]
+    D --> A
+    N --> R
+            </pre>
+          </div>
+        </div>
+        <div class="col-center" style="gap:6px;">
+          <div class="highlight-box">
+            <div class="hb-icon">⚡</div>
+            <div class="hb-text"><strong>No llega a cero</strong> — servicios como Aurora y ECS mantienen una base mínima. Pero el gasto en IA y cómputo adicional se reduce drásticamente en horas valle.</div>
+          </div>
+          <div class="card-grid-2" style="margin-top:0;">
+            <div style="background:rgba(201,169,78,0.03);border:1px solid rgba(201,169,78,0.08);border-radius:10px;padding:12px;text-align:center;">
+              <div style="font-family:'League Gothic',sans-serif;font-size:34px;color:#c9a94e;">100%</div>
+              <div style="font-family:'Figtree',sans-serif;font-size:11px;color:rgba(232,224,212,0.35);">capacidad en horas pico</div>
+            </div>
+            <div style="background:rgba(201,169,78,0.03);border:1px solid rgba(201,169,78,0.08);border-radius:10px;padding:12px;text-align:center;">
+              <div style="font-family:'League Gothic',sans-serif;font-size:34px;color:rgba(232,224,212,0.3);">~40%</div>
+              <div style="font-family:'Figtree',sans-serif;font-size:11px;color:rgba(232,224,212,0.35);">del costo en horas valle</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 12 — SLA -->
+    <div class="slide" data-slide="12">
+      <div class="overline reveal r1">Garantías contractuales</div>
+      <h2 class="reveal r2">Disponibilidad y tiempos <span class="gold">de respuesta</span></h2>
+      <div class="card-grid-4 reveal r3" style="margin-top:12px;max-width:900px;">
+        <div class="icon-box" style="padding:16px;">
+          <div class="ib-num">99.5%</div>
+          <div class="ib-label">Disponibilidad mensual</div>
+          <div class="ib-sub">&lt; 3.5h de interrupción al mes</div>
+        </div>
+        <div class="icon-box" style="padding:16px;">
+          <div class="ib-num">&lt; 3s</div>
+          <div class="ib-label">Respuesta en consultas típicas*</div>
+          <div class="ib-sub">95% de consultas respondidas en &lt;3s</div>
+        </div>
+        <div class="icon-box" style="padding:16px;">
+          <div class="ib-num">8h</div>
+          <div class="ib-label">Incidentes críticos</div>
+          <div class="ib-sub">Resolución en horario laboral</div>
+        </div>
+        <div class="icon-box" style="padding:16px;">
+          <div class="ib-num">Diario</div>
+          <div class="ib-label">Backups automáticos</div>
+          <div class="ib-sub">Sin intervención manual</div>
+        </div>
+      </div>
+      <div class="note reveal r4" style="margin-top:8px;max-width:1000px;">* El tiempo de respuesta varía según la complejidad de la consulta y el tamaño del contexto de la conversación. Preguntas simples con caché se responden en milisegundos. Consultas con contexto extenso o análisis profundo pueden tomar más tiempo, ya que dependen de los tiempos de procesamiento del modelo de IA (Claude). A mayor volumen de conversación histórica y más compleja la pregunta, mayor será el tiempo de respuesta del modelo. Este comportamiento es estándar en todos los sistemas de IA conversacional.</div>
+    </div>
+
+    <!-- SLIDE 13 — BLUE/GREEN -->
+    <div class="slide" data-slide="13">
+      <div class="overline reveal r1">Actualizaciones</div>
+      <h2 class="reveal r2">El sistema se renueva <span class="gold">sin detenerse</span></h2>
+      <div class="layout-stack reveal r3" style="margin-top:4px;flex:1;">
+        <div class="mermaid-wrap" style="min-height:140px;max-height:160px;">
+          <pre class="mermaid">
+flowchart LR
+    BLUE[🔵 Versión actual<br/>asesores la usan]
+    GREEN[🟢 Versión nueva<br/>se prepara en segundo plano]
+    SWAP[🔄 Cambio instantáneo]
+    USERS[👥 Asesores sin interrupción]
+    BLUE -->|Sirve tráfico| USERS
+    GREEN -.->|Lista| SWAP
+    SWAP -->|Nueva versión sirve| GREEN
+          </pre>
+        </div>
+        <div class="cards-row" style="flex:1;">
+          <div class="card">
+            <div class="card-title">Sin avisos de mantenimiento</div>
+            <p>Nunca verás "Sistema en mantenimiento". Las actualizaciones ocurren en vivo mientras la versión actual sigue funcionando.</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Rollback automático</div>
+            <p>Si algo sale mal con la actualización, el sistema vuelve a la versión anterior en segundos. Sin pérdida de datos ni conversaciones.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 14 — MONITOREO -->
+    <div class="slide" data-slide="14">
+      <div class="overline reveal r1">Control total</div>
+      <h2 class="reveal r2">Monitoreo 24/7, <span class="gold">alertas tempranas</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart TB
+    D[📊 Tablero en vivo]
+    M[📈 Asesores, consultas,<br/>costos, satisfacción]
+    A[🚨 Alertas: lentitud,<br/>errores, alta demanda]
+    T[👨‍💻 Notificación al<br/>equipo técnico]
+    D --> M --> A --> T
+            </pre>
+          </div>
+        </div>
+        <div class="col-center" style="gap:6px;">
+          <div class="card"><div class="card-title">Visibilidad en tiempo real</div><p>Cuántos asesores usan el sistema, qué preguntan, cuánto cuesta cada consulta.</p></div>
+          <div class="card"><div class="card-title">Alertas antes del problema</div><p>Si el sistema detecta lentitud o errores, avisa al equipo técnico antes de que los asesores se vean afectados.</p></div>
+          <div class="card"><div class="card-title">Auditoría completa</div><p>Cada conversación y acción queda registrada. Revisable en cualquier momento.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 15 — ENTREGABLES -->
+    <div class="slide" data-slide="15">
+      <div class="overline reveal r1">Independencia</div>
+      <h2 class="reveal r2">Todo lo que recibe <span class="gold">Capillas</span></h2>
+      <div class="card-grid-4 reveal r3" style="margin-top:12px;max-width:900px;">
+        <div class="icon-box" style="padding:14px;text-align:left;display:flex;gap:10px;align-items:flex-start;">
+          <div style="font-size:22px;flex-shrink:0;">📘</div>
+          <div><div class="card-title" style="font-size:12px;">Manuales de operación</div><div class="ib-sub" style="font-size:11px;">Guías paso a paso. Lenguaje simple.</div></div>
+        </div>
+        <div class="icon-box" style="padding:14px;text-align:left;display:flex;gap:10px;align-items:flex-start;">
+          <div style="font-size:22px;flex-shrink:0;">📐</div>
+          <div><div class="card-title" style="font-size:12px;">Planos de arquitectura</div><div class="ib-sub" style="font-size:11px;">Diagramas del sistema completo.</div></div>
+        </div>
+        <div class="icon-box" style="padding:14px;text-align:left;display:flex;gap:10px;align-items:flex-start;">
+          <div style="font-size:22px;flex-shrink:0;">🔒</div>
+          <div><div class="card-title" style="font-size:12px;">Protocolos de seguridad</div><div class="ib-sub" style="font-size:11px;">Para auditorías y cumplimiento legal.</div></div>
+        </div>
+        <div class="icon-box" style="padding:14px;text-align:left;display:flex;gap:10px;align-items:flex-start;">
+          <div style="font-size:22px;flex-shrink:0;">💻</div>
+          <div><div class="card-title" style="font-size:12px;">Código fuente completo</div><div class="ib-sub" style="font-size:11px;">Capillas es dueña de todo. Sin bloqueos.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 16 — RIESGOS -->
+    <div class="slide" data-slide="16">
+      <div class="overline reveal r1">Sin sorpresas</div>
+      <h2 class="reveal r2">La factura de la nube <span class="gold">nunca se dispara</span></h2>
+      <div class="two-col reveal r3" style="margin-top:4px;">
+        <div class="col-center">
+          <div class="mermaid-wrap mw-full">
+            <pre class="mermaid">
+flowchart LR
+    G[💰 Gasto mensual]
+    T[🔝 Topes automáticos]
+    A50[📧 Alerta 50%] --> A80[📧 Alerta 80%] --> A100[📧 Alerta 100%]
+    OK[✅ Gasto controlado]
+    G --> T
+    T --> A50
+    A100 --> OK
+            </pre>
+          </div>
+        </div>
+        <div class="col-center" style="gap:6px;">
+          <div class="card"><div class="card-title">Topes de gasto automáticos</div><p>Límites configurados en cada servicio. Si se alcanza el tope, el sistema avisa inmediatamente.</p></div>
+          <div class="card"><div class="card-title">Alertas escalonadas</div><p>Notificaciones al 50%, 80% y 100% del presupuesto. Nunca una sorpresa en la factura.</p></div>
+          <div class="card"><div class="card-title">Optimización continua</div><p>El sistema se monitorea para identificar oportunidades de ahorro sin sacrificar rendimiento.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 17 — CIERRE -->
+    <div class="slide closing-slide" data-slide="17">
+      <div class="overline reveal r1">Capillas de la Fe</div>
+      <h1 class="reveal r2">Tecnología<br><span class="gold">con propósito</span></h1>
+      <p class="closing-body reveal r3">IA que potencia a tu equipo — sin reemplazar<br>la conversación humana. El primer asistente<br>comercial inteligente del sector funerario en Colombia.</p>
+      <div class="date reveal r4" style="margin-top:24px;color:rgba(201,169,78,0.25);">Contáctanos para agendar una demo</div>
+    </div>
+
+    <div class="nav-hint">← → Navegar · E Editar · ⌘S Guardar</div>
+    <div class="page-num" id="pageNum">01 / 17</div>
+
+  </div><!-- /stage -->
+</div><!-- /viewport -->
+
+<script>
+  (function() {
+    'use strict';
+    mermaid.initialize({
+      startOnLoad: false, theme: 'base',
+      themeVariables: {
+        background: '#0a1628', primaryColor: '#0f1f3a', primaryTextColor: '#e8e0d4',
+        primaryBorderColor: '#c9a94e', lineColor: '#c9a94e', secondaryColor: '#162a4a',
+        tertiaryColor: '#1a3050', clusterBkg: 'transparent', clusterBorder: 'transparent',
+        nodeBorder: '#c9a94e', nodeTextColor: '#e8e0d4', edgeLabelBackground: '#0a1628',
+        fontFamily: 'Figtree, sans-serif', fontSize: '13px',
+      },
+      flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' },
+    });
+    const slides = document.querySelectorAll('.slide');
+    const total = slides.length;
+    let current = 0;
+    function renderMermaids() {
+      document.querySelectorAll('.mermaid').forEach(el => el.removeAttribute('data-processed'));
+      mermaid.run({ querySelector: '.mermaid', suppressErrors: true });
+    }
+    function goTo(index) {
+      if (index < 0 || index >= total) return;
+      slides.forEach((s, i) => s.classList.toggle('active', i === index));
+      current = index;
+      document.getElementById('pageNum').textContent = String(current + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0');
+    }
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); goTo(current + 1); }
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); goTo(current - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); goTo(0); }
+      else if (e.key === 'End') { e.preventDefault(); goTo(total - 1); }
+    });
+    let tx = 0;
+    document.addEventListener('touchstart', e => { tx = e.changedTouches[0].screenX; });
+    document.addEventListener('touchend', e => { const d = tx - e.changedTouches[0].screenX; if (Math.abs(d) > 50) { if (d > 0) goTo(current + 1); else goTo(current - 1); } });
+    document.querySelector('.stage').addEventListener('click', e => {
+      const r = document.querySelector('.stage').getBoundingClientRect();
+      const x = e.clientX - r.left;
+      if (x < r.width * 0.3) goTo(current - 1);
+      else if (x > r.width * 0.7) goTo(current + 1);
+    });
+    let editMode = false;
+    document.addEventListener('keydown', e => {
+      if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault(); editMode = !editMode;
+        document.body.style.cursor = editMode ? 'text' : '';
+        document.querySelectorAll('.slide.active [contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+        if (editMode) document.querySelectorAll('.slide.active h1, .slide.active h2, .slide.active p, .slide.active .card-title, .slide.active .overline, .slide.active .ib-label, .slide.active .ib-sub').forEach(el => el.setAttribute('contenteditable', 'true'));
+      }
+    });
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        const blob = new Blob(['<!DOCTYPE html>\n' + document.documentElement.outerHTML], { type: 'text/html;charset=utf-8' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'presentacion_comercial.html'; a.click();
+      }
+    });
+    window.addEventListener('load', () => { setTimeout(renderMermaids, 400); });
+    goTo(0);
+  })();
+</script>
+
+</body>
+</html>

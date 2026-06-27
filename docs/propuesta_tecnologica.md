@@ -894,7 +894,39 @@ Dado el riesgo legal del sector funerario (una respuesta errónea sobre cobertur
 
 > **Impacto en costos:** Las validaciones post-generación añaden latencia (~200ms) pero evitan respuestas erróneas con riesgo legal. El fallback por falta de contexto ahorra costos de Bedrock al no invocar al LLM cuando no hay información suficiente.
 
-### 5.5 Secret Management
+### 5.6 Panel de Control de Optimizaciones
+
+Las optimizaciones de costo (caché semántico y routing Haiku/Sonnet) son configurables mediante un panel de administración alojado en el mismo [KB Admin Panel](docs/...). El panel permite activar/desactivar cada optimización y ajustar umbrales en tiempo real, sin necesidad de desplegar código nuevo.
+
+#### 5.6.1 Toggles Disponibles
+
+| Optimización | Control | Impacto al desactivar |
+|-------------|---------|----------------------|
+| **Caché semántico** | ON/OFF + umbral de similitud (0.80 - 0.99) | Todas las consultas van al LLM. El costo LLM aumenta ~45% (ver tabla en sección 7.3) |
+| **Routing Haiku** | ON/OFF | Todas las consultas usan Sonnet. El costo LLM aumenta ~18% (ver tabla en sección 7.3) |
+
+#### 5.6.2 Flujo de Activación y Facturación
+
+Cada cambio en los toggles queda registrado con timestamp y usuario que lo realizó. Si se desactiva una optimización, el sistema calcula automáticamente el **ajuste prorrateado** para la factura del mes:
+
+```
+Ajuste = (días del mes con optimización desactivada / total días del mes) × incremento mensual
+```
+
+**Ejemplo:** Cliente pide desactivar caché por 10 días en un mes de 30 días:
+- Incremento mensual por caché desactivado: ~$1.690.000 COP
+- Ajuste: 10/30 × $1.690.000 = **$563.000 COP adicionales en la factura del mes**
+
+El ajuste se refleja automáticamente en la siguiente factura sin intervención manual.
+
+#### 5.6.3 Modelos de Acceso
+
+| Modelo | ¿Quién administra los toggles? | Flujo de cambios |
+|--------|-------------------------------|------------------|
+| **Modelo A** (Cliente administra Cloud) | El cliente tiene acceso al panel de control directamente desde el KB Admin. Al desactivar una optimización, el sistema muestra un aviso: *"Al desactivar esta optimización el costo mensual aumentará ~$X. ¿Desea continuar?"*. El cambio es inmediato y el ajuste de costo aparece en su reporte mensual. | El cliente decide autónomamente; el sistema le informa el impacto |
+| **Modelo B** (Nosotros administramos Cloud) | Solo el equipo técnico (integrador) tiene acceso al panel. El cliente solicita el cambio por los canales de soporte. El equipo lo evalúa, lo ejecuta si aplica, y el ajuste se refleja automáticamente en la factura del mes siguiente. | El cliente solicita → el integrador evalúa y ejecuta → el sistema ajusta la factura automáticamente |
+
+> **¿Por qué dos modelos?** En el Modelo A el cliente es dueño de su infraestructura y debe poder tomar decisiones operativas sin intermediarios. En el Modelo B nosotros administramos todo — el cliente no debería poder desactivar optimizaciones sin que evaluemos el impacto en la calidad del servicio y en los costos que nosotros asumimos.
 
 | Secreto | Almacenamiento | Rotación |
 |---------|---------------|----------|
@@ -1325,7 +1357,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | **Premium** | Hasta 300.000 | **$10.000.000 - $12.000.000** | ~$7M - $10M | Escalado, ~500 asesores |
 | **Ilimitado** | Sin límite | **$15.000.000 - $18.000.000** | ~$10M - $15M | Gran volumen |
 
-> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción + QA), mantenimiento de microservicios, soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.7), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
+> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción + QA), mantenimiento de microservicios, soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.8), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
 
 #### 8.2.6 Desglose de Costos del Plan Estándar
 
@@ -1351,7 +1383,52 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 > El precio se fija según el plan contratado (tabla 8.2.5). Para el plan Estándar, el precio es **$7.500.000**, que asume escenario de optimización Normal (~35% de ahorro sobre costos base de infraestructura) y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). Si durante el piloto los optimizadores (caché semántico, routing) resultan inaplicables por comprometer la calidad emocional de las respuestas, el ahorro se reduce o elimina y el precio se ajusta en la renovación del contrato.
 
-#### 8.2.7 Excedentes y Penalizaciones
+#### 8.2.7 Mecanismo de Ajuste Cambiario (TRM)
+
+Todos los costos de infraestructura AWS se facturan en **USD** (dólares americanos). Nuestra tarifa al cliente está denominada en **COP** (pesos colombianos). Para manejar la variación cambiaria ofrecemos dos opciones:
+
+##### Opción A: Precio en USD, Facturación en COP a TRM
+
+Fijamos el precio base del servicio en **USD** y facturamos en COP aplicando la TRM del día de facturación.
+
+| Aspecto | Detalle |
+|---------|---------|
+| **Precio base** | **$2,174 USD/mes** — equivalente a $7.500.000 COP a TRM $3,450 |
+| **Facturación** | $2,174 USD × TRM del día hábil anterior a la fecha de facturación |
+| **Frecuencia** | Mensual, día 1 de cada mes |
+| **Fuente TRM** | [Banco de la República](https://www.banrep.gov.co/es/estadisticas/trm) — tasa representativa del mercado del último día hábil |
+| **Ejemplo** | TRM a $4,200 → factura = $2,174 × 4,200 = **$9,130,800 COP**. TRM a $3,200 → factura = $2,174 × 3,200 = **$6,956,800 COP** |
+| **Riesgo para el cliente** | El monto en COP varía cada mes, pero el precio real en USD es fijo y conocido de antemano |
+| **Ventaja** | Justo para ambas partes: el precio refleja el costo real del servicio sin que ninguna parte especule con la TRM |
+
+> **Ventaja fiscal:** Para el cliente, facturar en USD vinculado a TRM es transparente ante la DIAN. La factura electrónica debe emitirse en COP (Ley 1819 de 2016), pero puede indicar la TRM usada como referencia de cálculo.
+
+##### Opción B (Híbrida): Precio Fijo con Franja de Tolerancia
+
+Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automático si la TRM supera un umbral.
+
+| Aspecto | Detalle |
+|---------|---------|
+| **Precio base** | $7.500.000 COP/mes — fijo **mientras la TRM se mantenga entre $3,100 y $3,795** (rango de ±10% sobre $3,450) |
+| **Ajuste automático** | Si la TRM supera $3,795, el precio aumenta en la misma proporción que el excedente sobre $3,795 |
+| **Fórmula** | `Precio = $7.500.000 + (TRM_actual - 3,795) × $630` |
+| **Frecuencia de ajuste** | Mensual, basado en la TRM promedio de los últimos 3 meses (para evitar picos puntuales) |
+| **Ajuste a la baja** | Si la TRM baja de $3,100, el precio se reduce con la misma fórmula (simétrico) |
+
+**Ejemplos:**
+| TRM del mes | Cálculo | Precio (COP) |
+|:-----------:|---------|:------------:|
+| $3,450 | Sin ajuste (dentro de la franja) | **$7,500,000** |
+| $3,600 | Sin ajuste (dentro de la franja de ±10%) | **$7,500,000** |
+| $4,200 | $7.5M + (4,200 - 3,795) × $630 = $7.5M + $255,150 | **$7,755,150** |
+| $4,800 | $7.5M + (4,800 - 3,795) × $630 = $7.5M + $633,150 | **$8,133,150** |
+| $3,000 | $7.5M - (3,100 - 3,000) × $630 = $7.5M - $63,000 | **$7,437,000** |
+
+**Detalle de la fórmula:** El factor $630 representa el precio del plan Estándar ($7.5M) dividido por la TRM base ($3,450), multiplicado por un factor de cobertura: `$7,500,000 / $3,450 = $2,174 USD` → por cada peso que sube la TRM sobre el umbral, el ajuste es de `$2,174 × 0.29 = $630 COP`. El factor 0.29 refleja que los costos AWS representan ~29% del precio al cliente (el resto es margen + mantenimiento, que son en COP).
+
+> **¿Cuál opción recomendamos?** Para un contrato de 12 meses con un cliente institucional en Colombia, la **Opción B** ofrece el mejor balance: el cliente tiene predictibilidad en ±10% de TRM (que cubre el ~80% de los escenarios históricos), y el integrador está protegido contra movimientos extremos del dólar. Si el cliente prefiere máxima simplicidad, la **Opción A** es la más transparente.
+
+#### 8.2.8 Excedentes y Penalizaciones
 
 | Concepto | Costo adicional |
 |----------|-----------------|
@@ -1361,18 +1438,18 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | Personalización adicional de features | Cotización aparte |
 | Capacitación adicional (sesión de 2 horas) | $250.000 COP/sesión |
 
-#### 8.2.8 SLA (Acuerdo de Nivel de Servicio)
+#### 8.2.9 SLA (Acuerdo de Nivel de Servicio)
 
 | Métrica | Compromiso |
 |---------|-----------|
 | Disponibilidad del widget | 99.5% (tiempo mensual) |
-| Tiempo de respuesta (p95) | < 3 segundos. Este tiempo está ligado a la latencia del modelo LLM: a mayor cantidad de texto en la consulta, mayor tiempo de procesamiento. Para una consulta típica de ~40 tokens de input y ~200 tokens de output (una pregunta de 30 palabras con respuesta de 150 palabras), [Claude Haiku](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) responde en ~300-500ms y [Claude Sonnet](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) en ~800-1500ms. El tiempo de <3s incluye el pipeline completo: cifrado/descifrado, búsqueda vectorial, generación y streaming |
+| Tiempo de respuesta (p95) | < 3 segundos. Este tiempo está ligado a la latencia del modelo LLM: a mayor cantidad de texto en la consulta, mayor tiempo de procesamiento. Para una consulta típica de ~40 tokens de input y ~200 tokens de output (una pregunta de 30 palabras con respuesta de 150 palabras), [Claude Haiku](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) responde en ~300-500ms y [Claude Sonnet](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) en ~800-1500ms. El tiempo de <3s incluye el pipeline completo: búsqueda vectorial, generación y streaming |
 | Tiempo de resolución de incidentes críticos | < 4 horas (horario laboral) |
 | Tiempo de resolución de incidentes menores | < 24 horas |
 | Frecuencia de backups | Diario automático |
 | Ventana de mantenimiento programado | Domingos 2am-4am. Durante esta ventana se realizan: actualizaciones de seguridad, parches de dependencias, optimización de base de datos (VACUUM, reindex), limpieza de logs, renovación de certificados, y despliegues programados |
 
-#### 8.2.9 Entregables y Calendario de Pagos (Modelo B)
+#### 8.2.10 Entregables y Calendario de Pagos (Modelo B)
 
 > **Entregables del Modelo A:** En el Modelo A (desarrollo por proyecto), los entregables son los mismos que en el Modelo B (ver tabla abajo), pero el pago se realiza por hitos según la tabla de la sección 8.1.3. Se entrega código fuente completo y documentación técnica. **No se incluye infraestructura como código (Terraform) ni pipeline CI/CD**, ya que en este modelo el cliente es 100% responsable de la infraestructura y DevOps. El cliente NO recibe soporte continuo ni administración de infraestructura.
 

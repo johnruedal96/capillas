@@ -52,11 +52,11 @@ flowchart TB
         ADMIN["📋 Panel Administración<br/><small>subir documentos</small>"]
     end
 
-    CHAT -->|"Todo cifrado<br/>AES-256-GCM"| CF
-    ADMIN -->|"Todo cifrado<br/>AES-256-GCM"| CF
+    CHAT -->|"HTTPS + TLS 1.3"| CF
+    ADMIN -->|"HTTPS + TLS 1.3"| CF
 
     subgraph AWS["AMAZON WEB SERVICES — Región Sao Paulo"]
-        CF["CloudFront + Lambda@Edge<br/><small>Red de distribución + Descifra en el borde</small>"]
+        CF["CloudFront + WAF<br/><small>Red de distribución + Firewall en el borde</small>"]
         GW["API Gateway<br/><small>Puerta de entrada — Valida quién entra</small>"]
         BFF["BFF Service<br/><small>Orquestador — Coordina todo</small>"]
         RAG["RAG Service<br/><small>Cerebro — Busca info + Combina conocimiento</small>"]
@@ -82,8 +82,7 @@ flowchart TB
 | Componente | ¿Qué es? | Analogía |
 |-----------|----------|----------|
 | **Widgets** (chat + admin) | Lo único que el usuario ve | La pantalla del cajero automático |
-| **CloudFront** | Red de distribución global | Como Netflix, para que cargue rápido en toda Colombia |
-| **Lambda@Edge** | Descifra en el borde de la red | El guardia que abre el sobre antes de entregarlo |
+| **CloudFront + WAF** | Red de distribución + firewall en el borde | El guardia que revisa el pase en la entrada y acelera el contenido |
 | **API Gateway** | Puerta de entrada | El torniquete del metro que valida el pase |
 | **BFF** | Orquestador | El gerente que coordina los departamentos |
 | **RAG Service** | Cerebro del sistema | El investigador que busca en los archivos |
@@ -97,8 +96,8 @@ flowchart TB
 
 | Aspecto | Opción 1 — Inicio rápido | Opción 2 — Corporativa |
 |---------|-------------------------|-----------------------|
-| **¿Quién autentica?** | Handshake RSA + AES (el frontend negocia la clave con el orquestador) | Cognito + SSO corporativo |
-| **Cifrado** | AES-256-GCM entre frontend y orquestador | AES-256-GCM + JWT de Cognito |
+| **¿Quién autentica?** | Handshake RSA (el frontend negocia la clave con el orquestador) | Cognito + SSO corporativo |
+| **Cifrado** | TLS 1.3 entre frontend y orquestador | TLS 1.3 + JWT de Cognito |
 | **Tiempo de implementación** | ~1 semana | ~3-4 semanas |
 | **Costo adicional** | $0 | $0 (Cognito gratis hasta 10K usuarios) |
 
@@ -112,40 +111,41 @@ flowchart TB
 sequenceDiagram
     participant A as Asesor
     participant W as Widget
-    participant E as CloudFront + Lambda@Edge
+    participant C as CloudFront + WAF
+    participant G as API Gateway
     participant B as BFF (Orquestador)
     participant R as RAG Service (Cerebro)
-    participant C as Redis Cache
+    participant RC as Redis Cache
     participant V as Aurora pgvector
     participant L as Bedrock Claude
 
     A->>W: "¿Qué plan para familia de 4 con $50/mes?"
-    Note over W: Cifra el mensaje<br/>(AES-256-GCM)
-    W->>E: POST cifrado
-    Note over E: Descifra en el borde<br/>(~3 milisegundos)
-    E->>B: JSON plano
+    Note over W: HTTPS con TLS 1.3
+    W->>C: POST HTTPS
+    Note over C: WAF valida el request<br/>CloudFront termina TLS
+    C->>G: Request validado
+    Note over G: API Gateway verifica JWT
+    G->>B: Request autenticado
 
     B->>B: Valida sesión del asesor
     B->>R: Envía consulta
 
-    R->>C: ¿Ya respondí esto antes?
+    R->>RC: ¿Ya respondí esto antes?
     alt Cache HIT (pregunta repetida)
-        C-->>R: Respuesta guardada (< 0.5 seg)
+        RC-->>R: Respuesta guardada (< 0.5 seg)
     else Cache MISS (pregunta nueva)
         R->>V: Busca documentos más relevantes
         V-->>R: Top 10 fragmentos
         Note over R: Arma contexto + filtra datos personales
         R->>L: Invoca Claude Sonnet
         L-->>R: Respuesta generada
-        R->>C: Guarda en cache para próxima vez
+        R->>RC: Guarda en cache para próxima vez
     end
 
     R-->>B: Respuesta
-    B-->>E: JSON plano
-    Note over E: Cifra la respuesta
-    E-->>W: Respuesta cifrada
-
-    W->>W: Descifra
+    B-->>G: Respuesta
+    G-->>C: Respuesta
+    C-->>W: Respuesta HTTPS
     W-->>A: "Plan Familiar Premium $48/mes.<br/>Cubre a toda la familia."
 ```
 
@@ -155,7 +155,7 @@ sequenceDiagram
 |-----------|--------|-------------------------------|
 | **Pregunta repetida** (cae del cache) | < 0.5 segundos | Instantáneo |
 | **Pregunta nueva** (pasa por IA) | ~2 segundos (p95) | Más rápido que buscar en carpetas |
-| **Cifrado/descifrado** | ~0.003 segundos | Imperceptible |
+| **Validación TLS + WAF** | ~0.003 segundos | Imperceptible |
 
 > **Conclusión:** El asesor espera menos de lo que esperaría si tuviera que buscar en carpetas, llamar a coordinación o revisar PDFs.
 
@@ -297,7 +297,7 @@ flowchart LR
 | ¿Costo si crecemos? | ~$19 COP por usuario extra | ~$114 COP por usuario extra | ~$19 COP por usuario extra |
 | **Costo mes para 100 asesores** | **$0 COP** | **$0 COP** | **$0 COP** |
 
-> **Nota:** Cognito (y esta comparativa) aplica solo para la **Opción 2 (Corporativa)**. En la **Opción 1 (Inicio rápido)** no se necesita sistema de autenticación externo — el handshake RSA+AES es suficiente. En ambos casos el costo es $0.
+> **Nota:** Cognito (y esta comparativa) aplica solo para la **Opción 2 (Corporativa)**. En la **Opción 1 (Inicio rápido)** no se necesita sistema de autenticación externo — el handshake RSA es suficiente. En ambos casos el costo es $0.
 
 ### Componente 2: Puerta de entrada (API)
 
@@ -371,13 +371,13 @@ flowchart LR
 | Eventos y programación (EventBridge) | ~$6.900 COP/mes | ~$13.800 COP/mes | ~$6.900 COP/mes |
 | **Costo mes estimado** | **~$17.250 COP** | **~$34.500 COP** | **~$17.250 COP** |
 
-### Componente 10: Seguridad y cifrado (KMS + ACM + Lambda@Edge)
+### Componente 10: Seguridad y cifrado (KMS + ACM + WAF)
 
-| Aspecto | AWS (KMS + ACM + Lambda@Edge) | Azure (Key Vault + Cert + WAF) | GCP (Cloud KMS + Armor) |
-|---------|-------------------------------|--------------------------------|--------------------------|
+| Aspecto | AWS (KMS + ACM + WAF) | Azure (Key Vault + Cert + WAF) | GCP (Cloud KMS + Armor) |
+|---------|----------------------|--------------------------------|--------------------------|
 | KMS / Key Vault (1 key) | ~$3.450 COP/mes | ~$10.350 COP/mes | ~$1.725 COP/mes |
 | ACM / Certificados (2 certs) | ~$0 COP (gratis) | ~$0 COP (gratis) | ~$0 COP (gratis) |
-| Lambda@Edge / WAF (descifrado en borde) | ~$8.625 COP/mes (100K invocaciones) | ~$24.150 COP/mes | ~$5.175 COP/mes |
+| WAF (firewall en borde) | ~$8.625 COP/mes (100K reglas evaluadas) | ~$24.150 COP/mes | ~$5.175 COP/mes |
 | **Costo mes estimado** | **~$12.075 COP** | **~$34.500 COP** | **~$6.900 COP** |
 
 ### Resumen — Comparativa de Costos por Componente
@@ -492,7 +492,7 @@ flowchart LR
 | **S3 + CloudFront** | Almacén de archivos (widgets, documentos) + red de distribución | Por GB almacenado + GB transferido | 10 GB de documentos, 50.000 descargas del widget al mes | **~$17.250** |
 | **Step Functions** | Orquestación automática cuando se sube un documento | Por paso ejecutado en el flujo | Ingresan documentos nuevas cada semana | **~$17.250** |
 | **CloudWatch + X-Ray** | Registro de todo lo que pasa: errores, tiempos, uso | Por volumen de datos de log y trazas | Logs de todos los servicios, 24/7 | **~$69.000** |
-| **KMS + ACM + Lambda@Edge** | Cifrado: llaves de encriptación, certificados SSL, descifrado en el borde | Por llave + por solicitud de cifrado + por ejecución de la función | 3 llaves de cifrado, certificados SSL gratis (ACM), 50.000 ejecuciones de descifrado | **~$12.075** |
+| **KMS + ACM + WAF** | Cifrado: llaves de encriptación, certificados SSL, firewall en el borde | Por llave + por solicitud de cifrado + por regla evaluada | 3 llaves de cifrado, certificados SSL gratis (ACM), WAF con reglas OWASP | **~$12.075** |
 | | | | | |
 | **Total Producción** | | | | **~$1.808.000** |
 | **+ Ambiente de pruebas (QA)** | Para desarrollo y pruebas — servicios más pequeños | Similar pero con servidores más baratos ("spot") y BD reducida | Servicios reducidos al mínimo | **~$255.000** |
@@ -542,7 +542,7 @@ flowchart LR
 | Cache (Redis) | ~$35.000 | ~$52.000 | ~$69.000 | ~$172.500 |
 | CDN + S3 | ~$3.500 | ~$10.000 | ~$17.250 | ~$51.750 |
 | Monitoreo (CloudWatch) | ~$35.000 | ~$52.000 | ~$69.000 | ~$172.500 |
-| Seguridad (KMS + Lambda@Edge) | ~$6.000 | ~$9.000 | ~$12.075 | ~$25.000 |
+| Seguridad (KMS + WAF) | ~$6.000 | ~$9.000 | ~$12.075 | ~$25.000 |
 | Otros (Step Functions, etc.) | ~$10.000 | ~$12.000 | ~$17.250 | ~$51.750 |
 | | | | | |
 | **Costo base estimado** | **~$635.200/mes** | **~$1.257.500/mes** | **~$1.807.800/mes** | **~$4.449.625/mes** |
@@ -637,40 +637,41 @@ Con cache + routing inteligente, el costo efectivo por conversación es:
 ```mermaid
 sequenceDiagram
     participant W as Widget (Chat o Admin)
-    participant I as Internet
-    participant E as CloudFront + Lambda@Edge
+    participant C as CloudFront + WAF
+    participant G as API Gateway
     participant S as Servicios Internos AWS
 
-    Note over W,S: MODO CIFRADO (X-Cypher Enabled: true)
+    Note over W,S: TLS 1.3 — Estándar bancario
 
-    W->>W: Obtiene clave de cifrado<br/>(handshake RSA o Cognito)
-    W->>W: Cifra el mensaje con AES-256-GCM<br/>(★ mismo estándar que usan los bancos ★)
-    W->>I: Body cifrado + headers cifrados
-    I->>E: Llega a CloudFront
+    W->>W: HTTPS con TLS 1.3
+    W->>C: Request HTTPS
+    Note over C: WAF filtra amenazas<br/>CloudFront termina TLS
+    C->>G: Request validado
+    Note over G: API Gateway verifica JWT
+    G->>S: Request autenticado
+    Note over S: Los servicios trabajan<br/>en red privada AWS
 
-    Note over E: Función Lambda@Edge descifra<br/>y reconstruye el request original
-    E->>S: JSON plano (sin cifrar)
-    Note over S: Los servicios trabajan<br/>con datos normales
-
-    S->>E: Respuesta JSON plano
-    Note over E: Lambda@Edge cifra la respuesta
-    E->>I: Respuesta cifrada
-    I->>W: Llega al widget
-    W->>W: Descifra y muestra al asesor
+    S->>G: Respuesta
+    G->>C: Respuesta
+    C->>W: Respuesta HTTPS
+    W->>W: Renderiza respuesta al asesor
 ```
 
 ### ¿Cómo funciona?
 
-1. El widget cifra el mensaje con **AES-256-GCM** — el mismo estándar que usan los bancos para las transferencias
-2. Los headers también viajan cifrados (el atacante no sabe ni quién hizo la consulta)
-3. En CloudFront, una función descifra y pasa el mensaje a los servicios internos
-4. Los servicios internos nunca ven datos cifrados — trabajan con JSON plano
-5. La respuesta viaja de vuelta cifrada
-6. El widget la descifra y el asesor la ve
+1. El widget se comunica con **HTTPS + TLS 1.3** — el mismo estándar que usan los bancos y el comercio electrónico
+2. CloudFront termina el cifrado TLS y el WAF filtra amenazas (SQL injection, XSS, OWASP Top 10)
+3. API Gateway verifica el token JWT del asesor antes de pasar el request a los servicios internos
+4. Los servicios internos se comunican dentro de la red privada de AWS (VPC), sin exposición a internet
+5. La respuesta viaja de vuelta por HTTPS
 
-**¿Para qué sirve el modo empresa (B2B)?**
+**¿Por qué no necesitamos cifrado adicional (X-Cypher)?**
 
-Si en el futuro otro sistema (no el widget) quiere conectarse al nuestro, puede hacerlo sin cifrado adicional porque la comunicación es entre servidores dentro de la misma red privada. Se desactiva con una bandera.
+El estándar **TLS 1.3** es el mismo mecanismo que protege las transacciones bancarias, el comercio electrónico y las comunicaciones gubernamentales. No necesitamos una capa de cifrado personalizada porque:
+- TLS 1.3 está auditado por los mejores criptógrafos del mundo
+- Es implementado por todos los navegadores y sistemas operativos
+- AWS lo usa internamente entre todos sus servicios
+- Agregar cifrado personalizado (X-Cypher) solo añade complejidad sin beneficio real de seguridad
 
 ### Cumplimiento de la Ley 1581 de 2012 (Protección de Datos Colombia)
 
@@ -682,14 +683,14 @@ Si en el futuro otro sistema (no el widget) quiere conectarse al nuestro, puede 
 | **Derechos ARCO** | El cliente puede pedir que le muestren o eliminen sus datos |
 | **Notificación de brechas** | Tenemos sistema de alertas y procedimiento para reportar a la SIC en 15 días hábiles |
 | **Minimización** | Solo recolectamos los datos necesarios para la asesoría |
-| **Cifrado** | Todo cifrado durante el tránsito (X-Cypher) y en reposo (KMS) |
+| **Cifrado** | Todo cifrado durante el tránsito (TLS 1.3) y en reposo (KMS) |
 
 ### Amenazas que prevenimos
 
 ```mermaid
 flowchart TB
     THREATS["¿Qué ataques prevenimos?"]
-    MITM["Interceptar comunicación<br/>➡ TLS 1.3 + cifrado extra X-Cypher"]
+    MITM["Interceptar comunicación<br/>➡ TLS 1.3 + WAF"]
     SESSION["Robar sesión de un asesor<br/>➡ Token expira cada 15 minutos"]
     INJECT["Inyectar mensaje malicioso<br/>➡ Filtros de entrada + widget aislado"]
     PII_FILTER["IA filtra datos personales<br/>➡ Filtro automático antes de Claude"]
@@ -713,7 +714,7 @@ flowchart TB
     subgraph SISTEMA[EL SISTEMA EN UNA MIRADA]
         L1["💬 Chat + 📋 Panel Admin<br/>2 opciones de instalación"]
         L2["⚡ Responde en ~2 segundos<br/>Cache: < 0.5 segundos"]
-        L3["🔒 Cifrado bancario (AES-256-GCM)<br/>+ Cumplimiento Ley 1581"]
+        L3["🔒 Cifrado bancario (TLS 1.3)<br/>+ Cumplimiento Ley 1581"]
         L4["🧠 Claude Sonnet (Anthropic)<br/>Mejor IA en español para el sector funerario"]
         L5["☁️ AWS (Sao Paulo)<br/>Costo por asesor BAJA al escalar<br/>10 asesores: ~$50K/mes c/u<br/>100 asesores: ~$15K/mes c/u<br/>500 asesores: ~$7.5K/mes c/u"]
     end
@@ -725,7 +726,7 @@ flowchart TB
 | **¿Cómo se instala?** | Opción 1: importar un script CDN. Opción 2: SSO corporativo. Sin cambio de software |
 | **¿Qué tecnología usa?** | Amazon Web Services (AWS), región Sao Paulo |
 | **¿Qué tan rápido responde?** | ~2 segundos el 95% de las veces. Si es pregunta repetida, < 0.5 segundos |
-| **¿Es seguro?** | Cifrado bancario (AES-256-GCM) + Cumplimiento Ley 1581 de Protección de Datos |
+| **¿Es seguro?** | Cifrado bancario (TLS 1.3) + Cumplimiento Ley 1581 de Protección de Datos |
 | **¿Cuánto cuesta la nube para 100 asesores?** | ~$1.200.000 — $1.800.000 COP/mes (después de optimización) |
 | **¿Y si somos 10?** | ~$450.000 — $580.000 COP/mes |
 | **¿Y si somos 500?** | ~$3.200.000 — $4.500.000 COP/mes |

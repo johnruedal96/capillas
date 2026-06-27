@@ -42,7 +42,7 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **LLM Económico** | [Claude Haiku 4.5](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$3.450/$17.250 COP por MTok, tareas simples alto volumen |
 | **Caché** | [ElastiCache Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) + [Semantic Cache](https://python.langchain.com/docs/how_to/contextual_compression/) (propuesta sujeta a pruebas — el negocio funerario tiene respuestas muy sensibles al contexto: una consulta de "planes para contratar" es distinta a "acabo de perder un ser querido", lo que puede reducir el hit rate del caché semántico) | Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%**. Latencia <10ms en cache hit |
 | **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes |
-| **Cifrado** | [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) extremo a extremo + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [ACM (TLS 1.3)](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) | Cifrado payload + headers personalizados; ACM gratuito, KMS ~$3.450/key/mes COP |
+| **Cifrado** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [ACM (TLS 1.3)](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) todo el canal + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | ACM gratuito, KMS ~$3.450/key/mes COP |
 | **Observabilidad** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) (self-hosted) + [Grafana](https://grafana.com/docs/) | Datos soberanos, trazabilidad completa |
 | **CI/CD** | [GitHub Actions](https://docs.github.com/en/actions) + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) | Despliegue automatizado [blue/green](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html) |
 
@@ -130,7 +130,7 @@ sequenceDiagram
     participant L as Bedrock Claude
 
     A->>W: Que plan para familia de 4?
-    W->>W: Cifrar con AES-256-GCM
+    W->>W: Sigilo del túnel TLS 1.3 — el payload viaja cifrado de extremo a extremo
     W->>B: POST /api/chat body cifrado
     B->>B: Lambda descifra payload
     Note over B: Valida JWT y contexto
@@ -179,7 +179,7 @@ sequenceDiagram
     SDK->>SDK: Descifra con AES key<br/>→ obtiene session_token
     SDK-->>Front: Retorna session_token
     Front->>Widget: <chat-widget token="eyJ...">
-    Widget->>Widget: Deriva session key (PBKDF2)<br/>para X-Cypher
+    Widget->>Widget: Almacena session_token en memoria
 ```
 
 El cliente solo necesita importar nuestro SDK (alojado en CDN) y llamar a una función con los datos del usuario que ya tiene por su login (ID, nombre, email). El SDK internamente:
@@ -198,7 +198,7 @@ El cliente solo necesita importar nuestro SDK (alojado en CDN) y llamar a una fu
 - El nonce + timestamp evita que un atacante re-envíe una solicitud interceptada (replay attack)
 - [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) restringido al dominio del cliente bloquea handshakes desde sitios externos
 - El token final es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nosotros → nuestro backend lo valida sin depender de sistemas externos
-- Todos los requests posteriores del widget van cifrados con [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final), el token nunca viaja en texto plano
+- Todos los requests posteriores del widget viajan por [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). El token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) va en el header `Authorization: Bearer` dentro del canal cifrado
 
 #### Opción 2 — Auth gestionada (Nosotros manejamos login y app)
 
@@ -233,21 +233,21 @@ sequenceDiagram
     Widget->>GW: API Call con cifrado
 ```
 
-### 2.4 Flujo de Seguridad — Cifrado Extremo a Extremo (X-Cypher)
+### 2.4 Flujo de Seguridad — TLS 1.3
 
 ```mermaid
 graph LR
     WIDGET[Widget Lit 3 - Cliente]
-    LAMBDA["Lambda@Edge - Descifrador"]
+    CF[CloudFront + WAF]
     GW[API Gateway]
     BFF[BFF Service]
     RAG[RAG Service]
 
-    WIDGET -->|Request cifrado AES-256-GCM| LAMBDA
-    LAMBDA -->|Descifra y reconstruye| GW
-    GW -->|JSON plano| BFF
-    BFF -->|gRPC| RAG
-    BFF -->|Response JSON| GW
+    WIDGET -->|HTTPS POST cifrado por TLS 1.3| CF
+    CF -->|Request cifrado| GW
+    GW -->|Valida JWT + rate limit| BFF
+    BFF -->|gRPC mTLS| RAG
+    BFF -->|Response cifrado| GW
     GW --> LAMBDA
     LAMBDA -->|Cifra response| WIDGET
     WIDGET -.->|B2B: sin cifrar| GW
@@ -280,7 +280,7 @@ El widget se instala agregando un `<script>` tag y un [custom element](https://d
 | Build | Vite | 6.x | — |
 | Formato output | IIFE | — | ~20 KB gzip total |
 | Shadow DOM | Nativo | — | CSS aislado automático |
-| Cifrado | [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API) | Nativo | AES-256-GCM |
+| Cifrado | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | Nativo del navegador + CloudFront |
 | Testing | Web Test Runner | — | — |
 
 #### 3.1.4 Flujo de Comunicación con el Host
@@ -302,13 +302,17 @@ El manejo de tokens difiere según la opción de despliegue. En ambos modos, el 
 
 **Opción 2 (App completa):** La app SPA maneja el flujo [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html). Se utilizan tres tipos de token: Access Token ([JWT](https://datatracker.ietf.org/doc/html/rfc7519), 15 min, en memoria para API calls), Refresh Token (30 días, en cookie segura HttpOnly para renovar), e ID Token (1 hora, en memoria para perfil de usuario).
 
-#### 3.1.6 Cifrado en el Widget — X-Cypher
+#### 3.1.6 Seguridad en el Widget
 
-El widget implementa cifrado extremo a extremo. Cada request se cifra con [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) utilizando una clave de sesión derivada del [JWT](https://datatracker.ietf.org/doc/html/rfc7519) y una clave aleatoria generada durante el handshake. Los headers también se cifran, de modo que un atacante solo ve contenido ilegible en tránsito.
+El widget utiliza [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) para toda la comunicación. No se requiere cifrado adicional a nivel de aplicación — TLS 1.3 protege el payload y headers en tránsito de forma nativa, igual que en banca online y comercio electrónico.
+
+El [JWT](https://datatracker.ietf.org/doc/html/rfc7519) de autenticación viaja en el header `Authorization: Bearer` dentro del túnel TLS. Tiene expiración de 15 minutos y se refresca automáticamente mediante refresh token rotativo.
+
+**Seguridad web adicional:** [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy) (CSP) restringe qué scripts pueden ejecutarse en el widget. [HSTS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security) forza HTTPS. CORS limitado al dominio del cliente.
 
 #### 3.1.7 Widget de Administración de Knowledge Base (KB Admin Widget)
 
-Al igual que el widget de chat, el panel de administración de la base de conocimiento se construye como un **[Lit 3](https://lit.dev/docs/) [Custom Element](https://developer.mozilla.org/en-US/docs/Web/API/Web_components) empaquetado como IIFE**, con la misma arquitectura de cifrado X-Cypher. Esto permite **reutilizarlo en cualquier cliente** con un simple `<script>` tag, sin importar el framework del host. Los asesores NUNCA ven este panel — solo los administradores lo usan para gestionar documentos.
+Al igual que el widget de chat, el panel de administración de la base de conocimiento se construye como un **[Lit 3](https://lit.dev/docs/) [Custom Element](https://developer.mozilla.org/en-US/docs/Web/API/Web_components) empaquetado como IIFE**, con la misma seguridad [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519). Esto permite **reutilizarlo en cualquier cliente** con un simple `<script>` tag, sin importar el framework del host. Los asesores NUNCA ven este panel — solo los administradores lo usan para gestionar documentos.
 
 Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y un custom element, con atributos de configuración.
 
@@ -330,14 +334,22 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 | Framework | Lit 3 | Mismo que el widget de chat |
 | Build | Vite IIFE | Mismo bundle, mismo formato |
 | Autenticación | Opción 1: token del host<br/>Opción 2: [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) (rol admin) | Depende del modo de despliegue |
-| Cifrado | X-Cypher ([AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final)) | **Misma estrategia que el chat** — nada viaja en texto plano |
+| Cifrado | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | **Misma estrategia que el chat** — canal cifrado por TLS |
 | Hosting | [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | Mismo CDN, ruta `/admin/` |
-| API | Knowledge Base Service ([FastAPI](https://fastapi.tiangolo.com/)) | Endpoints protegidos con X-Cypher |
+| API | Knowledge Base Service ([FastAPI](https://fastapi.tiangolo.com/)) | Endpoints protegidos con [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) |
 | Pipeline ingesta | [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) → [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) → [pgvector](https://github.com/pgvector/pgvector) | Automático |
 
-**Flujo de comunicación cifrada (idéntico al widget de chat):** El KB Admin Widget envía requests cifrados con [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) al [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) descifra el payload y los headers, reconstruye el request y lo pasa al Knowledge Base Service. La respuesta viaja de vuelta cifrada. Para comunicación interna entre servicios, se desactiva el cifrado con una bandera y viaja en JSON plano.
+**Comunicación (idéntico al widget de chat):** El KB Admin Widget se comunica con [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) vía [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). El token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) viaja en el header `Authorization: Bearer`. Para comunicación interna entre servicios (dentro de la [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html)), se usa [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) o [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
 
 **Flujo de ingesta de documentos:** El administrador sube un archivo (PDF, DOCX, MD, TXT) y el servicio lo guarda en [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) conservando el original intacto. Inmediatamente se dispara un flujo automático en [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) que: (1) **Convierte el documento a Markdown** — PDFs y DOCXs se transforman a Markdown preservando tablas, listas, títulos y jerarquía; TXT y MD se mantienen tal cual. El Markdown se almacena junto al original en S3. (2) Divide el Markdown en fragmentos semánticos. (3) Extrae metadatos (categoría, fecha, versión). (4) Genera vectores ([embeddings](https://platform.openai.com/docs/guides/embeddings)) con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html). (5) Almacena en [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) [pgvector](https://github.com/pgvector/pgvector). Los LLMs entienden Markdown de forma nativa — tablas, formato y jerarquía se preservan mucho mejor que con texto plano extraído de PDF.
+
+> **Flujo de trabajo para TI (actualización de planes):** El proceso manual para mantener la base de conocimiento actualizada es:
+> 1. **Preparar** el documento nuevo (PDF, DOCX o MD) con las tarifas actualizadas siguiendo la misma estructura del anterior
+> 2. **Subir** al KB Admin Panel, seleccionando la misma categoría y nombre identificador
+> 3. **Confirmar** el reemplazo cuando el sistema pregunte "Ya existe un documento con este nombre. ¿Reemplazar versión anterior?"
+> 4. **Verificar** el estado en el historial de ingesta (pasa de "procesando" a "indexado" en ~30-60s)
+> 5. **Probar** con una consulta de prueba desde el panel o desde el widget de chat para confirmar que el asistente responde con la nueva información
+> 6. El cambio es inmediato — desde el momento en que el estado cambia a "indexado", el asistente usa la nueva versión. No hay ventana de mantenimiento ni downtime
 
 ### 3.2 Backend — Microservicios
 
@@ -358,8 +370,7 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 
 | De | A | Protocolo | Autenticación | Propósito |
 |----|---|-----------|---------------|-----------|
-| [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Interno | — | Request descifrado |
-| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | BFF | HTTP/1.1 | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) | Solicitudes widget |
+| [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | HTTPS (TLS 1.3) | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) | Solicitudes widget |
 | BFF | RAG | [gRPC](https://grpc.io/docs/) + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) | Certificado cliente | Consultas RAG |
 | BFF | Analytics | [SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html) | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Eventos async |
 | RAG | [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) | AWS SDK | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | InvokeModel |
@@ -499,7 +510,6 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 |----------|-----|---------------|
 | **[Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** | Autenticación y autorización | 10K MAU gratis, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)/[OIDC](https://openid.net/specs/openid-connect-core-1_0.html), MFA, SSO |
 | **[API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)** | API entry point | $1/1M requests (vs $3.50 REST), [JWT](https://datatracker.ietf.org/doc/html/rfc7519) auth nativo |
-| **[Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html)** | Descifrado X-Cypher en el edge | Sin costo adicional en tier gratis (1M req/mes) — se ejecuta en [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) |
 | **[ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)** | Orquestación de microservicios | Sin Kubernetes, ~$50-300/mes, auto-escalado |
 | **[Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html)** | Base de datos principal + vectores | [pgvector](https://github.com/pgvector/pgvector) gratis, datos relacionales + vectores en una DB |
 | **[Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html)** | LLM (Claude) + Embeddings (Titan) | Sin mínimo, pago por token, [Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html). ⚠️ Cognito NO controla gasto de Bedrock. Para limitar por asesor se implementa middleware en BFF que lleva conteo de tokens/usuario en [DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) y rechaza si excede su cupo. Las consultas que excedan el límite se facturan como excedente |
@@ -513,7 +523,7 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 | **[VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) + Subnets + Security Groups** | Red privada para microservicios | Gratis (el VPC en sí no tiene costo). Incluye subnets públicas/privadas, route tables, internet gateway |
 | **[NAT Gateway](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html)** | Salida a internet desde subnets privadas | ~$33/mes + $0.045/GB procesado (~$50-70/mes con tráfico típico). Alternativa más barata: [VPC Gateway Endpoints](https://docs.aws.amazon.com/vpc/latest/privatelink/gateway-endpoints.html) para [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)/[DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) (gratis) |
 | **IPv4 Públicos** | IPs elásticas para NAT Gateway, balanceadores | $0.005/hr ≈ $3.60/mes por IP. Estimar 2-3 IPs |
-| **[AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html)** | Protección contra [OWASP Top 10](https://owasp.org/www-project-top-ten/), rate limiting | $5/mes por Web ACL + $0.60/1M requests. ~$15-25/mes con tráfico típico |
+| **[AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html)** | Protección web en el edge + rate limiting, integrado con [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | $5/mes por Web ACL + $0.60/1M requests. ~$15-25/mes con tráfico típico |
 | **[Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html)** | DNS, dominio, health checks | $0.50/zone/mes + ~$12/año por dominio .com |
 | **[CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Logs** | Logs de microservicios y auditoría | $0.50/GB ingerido (primeros 5GB gratis). ~$5-10/mes con retención 30 días |
 | **[Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)** | Gestión de credenciales y API keys | $0.40/secret/mes + $0.05/10K llamadas. ~$8-15/mes para 20-30 secrets |
@@ -761,10 +771,10 @@ graph LR
    - [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) es gestionado
    - [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) es serverless
 
-5. **X-Cypher nativo en el edge:**
-   - [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) se ejecuta en [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) sin costo adicional
-   - Descifrado en el edge, microservicios reciben JSON plano
-   - Sin modificar la lógica de negocio de cada servicio
+5. **Seguridad a nivel de transporte (TLS 1.3):**
+   - [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) cifra todo el tránsito
+   - Certificados gestionados por [ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) sin costo adicional
+   - [HSTS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security) + [CSP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy) como capas adicionales
 
 6. **Portabilidad futura:**
    - El stack ([FastAPI](https://fastapi.tiangolo.com/) + [pgvector](https://github.com/pgvector/pgvector) + [Lit](https://lit.dev/docs/) widget) es portable a cualquier cloud
@@ -805,96 +815,55 @@ graph LR
 | **Injection (prompt)** | Separación system/user prompt + input sanitization | [Prompt engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) estructurado |
 | **Key compromise** | [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) + rotación automática | Rotación cada 30 días |
 | **Data at rest** | [KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) encryption en todos los servicios | Aurora, S3, Redis con KMS |
-| **Payload interception** | X-Cypher: cifrado extremo a extremo payload + headers | [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) + [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) descifrador |
+| **Payload interception** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) cifra todo el canal — el payload viaja protegido de extremo a extremo | Canal HTTPS estándar con certificados [ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) |
 
-### 5.2 Comunicación Cifrada — X-Cypher (Cifrado Extremo a Extremo)
+### 5.2 Seguridad en el Tránsito — TLS 1.3 + Buenas Prácticas
 
-#### 5.2.1 Arquitectura
+Utilizamos las capas de seguridad estándar de la industria que protegen bancos, hospitales y comercio electrónico. No implementamos cifrado personalizado a nivel de aplicación porque **TLS 1.3 ya cifra todo el payload, los headers y los parámetros** en tránsito. Un atacante que intercepte el tráfico ve bytes cifrados, no JSON plano.
 
-El sistema implementa una capa de cifrado personalizada que garantiza que **todo el payload y los headers sensibles viajen cifrados** entre el widget y el backend, sin exponer JSON plano en tránsito.
+#### 5.2.1 Capas de Seguridad
+
+| Capa | Mecanismo | Detalle |
+|------|-----------|---------|
+| **Transporte** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) | Todo el tráfico viaja cifrado. TLS 1.3 reduce el handshake a 1-RTT (< 100ms) y elimina cifrados inseguros. [ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) gestiona los certificados automáticamente (gratis) |
+| **Autenticación** | [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [OIDC](https://openid.net/specs/openid-connect-core-1_0.html) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | Tokens de acceso de **15 minutos** de vida útil, refresh tokens rotativos. El token viaja en header `Authorization: Bearer` dentro del túnel TLS |
+| **Seguridad web** | [HSTS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security) + [CSP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy) + CORS | HSTS forza HTTPS. CSP limita qué scripts pueden ejecutarse. CORS restringido al dominio del cliente |
+| **Service-to-service** | [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | Comunicación interna BFF ↔ RAG ↔ KB autenticada con certificados mutuos |
+| **Rate limiting** | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-throttling.html) por usuario | Límite de requests por asesor para evitar abusos |
+| **Datos en reposo** | [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) | Bases de datos y S3 cifrados con claves gestionadas por KMS, rotación automática anual |
+
+#### 5.2.2 Flujo de Comunicación
 
 ```mermaid
 sequenceDiagram
-    participant W as Widget
-    participant CF as CloudFront + Lambda
+    participant W as Widget (Navegador)
+    participant CF as CloudFront + WAF
     participant GW as API Gateway
-    participant SVC as Microservicios
+    participant SVC as Microservicios (VPC)
 
-    Note over W,SVC: MODO CIFRADO X-Cypher-Enabled true
-    W->>W: Deriva session key PBKDF2
-    W->>W: Cifra body con AES-256-GCM
-    W->>W: Cifra headers sensibles
-    W->>CF: POST con body y headers cifrados
-    CF->>CF: Lambda@Edge descifra payload
-    CF->>CF: Reconstruye request original
-    CF->>GW: Request JSON plano
-    GW->>SVC: Enrutamiento normal
-    SVC-->>GW: Response JSON plano
-    GW-->>CF: Response plano
-    CF->>CF: Cifra response con session key
-    CF-->>W: Response cifrado
-    W->>W: Descifra y renderiza
-
-    Note over W,SVC: MODO B2B X-Cypher-Enabled false
-    W->>CF: POST con JSON plano
-    CF->>CF: Passthrough sin cifrar
-    CF->>GW: Request plano
-    Note over W,SVC: Ideal para server-to-server
+    Note over W,SVC: TLS 1.3 protege todo el tránsito
+    W->>CF: HTTPS POST /api/chat\nHeader: Authorization: Bearer <JWT>\nBody: {"mensaje": "consulta"} 🛡️cifrado por TLS
+    CF->>GW: Reenvía sin descifrar (HTTPS)
+    GW->>GW: Valida JWT + rate limit
+    GW->>SVC: gRPC mTLS (VPC privada)
+    SVC-->>GW: Response JSON
+    GW-->>W: Response cifrado por TLS
 ```
 
-#### 5.2.2 Cabeceras del Protocolo X-Cypher
+> **¿Por qué no necesitamos cifrado extra?** TLS 1.3 es el mismo estándar que protege la banca online, el comercio electrónico y las comunicaciones médicas. Un atacante que capture el tráfico solo ve una secuencia de bytes cifrados. No puede leer el JSON, los headers, ni los parámetros. Para comprometerlo necesitaría el private key del servidor (protegido por AWS KMS / ACM) o malware en el dispositivo del asesor (donde el cifrado a nivel aplicación tampoco ayuda porque el atacante lee los datos antes de cifrarlos).
 
-| Cabecera | Obligatoria | Descripción |
-|----------|-------------|-------------|
-| `X-Cypher-Enabled` | Sí | `true` = cifrado activo, `false` = bypass (B2B) |
-| `X-Cypher-Headers` | Sí (si enabled) | JSON cifrado con los headers originales (Authorization, Content-Type, etc.) |
-| `X-Cypher-IV` | Sí (si enabled) | IV del AES-256-GCM en base64 |
-| `X-Cypher-Version` | No | Versión del protocolo (v1 por defecto) |
-| `X-Cypher-Decrypted` | No | Inyectado por Lambda@Edge: `true` si se descifró correctamente |
+#### 5.2.3 Comparativa: Enfoque Propuesto (TLS 1.3) vs Alternativas
 
-#### 5.2.3 Proceso de Cifrado y Descifrado (X-Cypher)
+| Aspecto | TLS 1.3 + JWT (nuestro enfoque) | X-Cypher (AES-256-GCM custom) | mTLS solo |
+|---------|--------------------------------|-------------------------------|-----------|
+| **Cifrado payload** | ✅ TLS lo cubre | ✅ Extra | ❌ No |
+| **Protección MITM** | ✅ Suficiente | ✅ Defensa en profundidad | ✅ Canal |
+| **Complejidad operativa** | 🟢 Baja (certificados ACM auto) | 🟡 Media (Lambda@Edge + keys) | 🟡 Media (PKI) |
+| **Depuración** | 🟢 Normal (herramientas estándar) | 🔴 Difícil (todo cifrado) | 🟢 Normal |
+| **Latencia extra** | ~0ms | ~2-5ms | ~0ms |
+| **Mantenimiento** | 🟢 Casi nulo | 🟡 Rotación de keys | 🟡 Rotación de certificados |
 
-**En el widget:** Cada request se cifra con [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) usando una clave de sesión derivada del token de acceso mediante [PBKDF2](https://csrc.nist.gov/publications/detail/sp/800-132/final). El body del mensaje y los headers (Authorization, Content-Type, etc.) se cifran por separado, cada uno con su propio IV aleatorio de 12 bytes. El request viaja con `Content-Type: text/plain` y los headers cifrados en cabeceras `X-Cypher-*`.
-
-**En [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html):** Una función en [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) intercepta el request. Verifica que `X-Cypher-Enabled: true`, reconstruye la clave de sesión desde el token de acceso, descifra los headers y el body, inyecta una cabecera `X-Cypher-Decrypted: true`, y envía el request reconstruido a [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). La respuesta del servidor se vuelve a cifrar antes de devolverla al widget.
-
-**Modo B2B:** Para integraciones server-to-server, se envía `X-Cypher-Enabled: false`. El body viaja como JSON plano por [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) sin cifrado extra. Esto permite depuración y evita latencia innecesaria en comunicaciones back-to-back dentro de la [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) privada.
-
-#### 5.2.4 Manejo de Claves y Sesiones
-
-| Aspecto | Detalle |
-|---------|---------|
-| **Derivación** | [PBKDF2](https://csrc.nist.gov/publications/detail/sp/800-132/final) con access token + salt por tenant, 100K iteraciones |
-| **Algoritmo** | [AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) (autenticado — detecta manipulación) |
-| **IV** | 12 bytes aleatorios por cada operación de cifrado |
-| **Rotación de clave** | Cada vez que se refresca el access token (15 min) |
-| **Almacenamiento en widget** | Variable in-memory (nunca localStorage) |
-| **Almacenamiento en edge** | Ninguno — la clave se deriva del AT en cada request |
-| **Tag de autenticación** | GCM añade 16 bytes de tag — detecta cualquier alteración |
-
-#### 5.2.6 Modo B2B (Desactivar Cifrado)
-
-Para integraciones **server-to-server** (ej. API consumida por otro backend interno, o por sistemas de terceros), el cifrado se desactiva enviando la cabecera `X-Cypher-Enabled: false`.
-
-En este modo:
-- El body viaja como JSON plano
-- Los headers viajan normales (sin X-Cypher-Headers)
-- [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) hace **passthrough** sin cifrar/descifrar
-- [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) sigue protegiendo el tránsito
-
-**¿Por qué desactivarlo?** En comunicación back-to-back, el riesgo de MITM es menor (TLS + [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) privada), y el cifrado extra añadiría latencia innecesaria. Además, permite que herramientas de depuración/observabilidad (Datadog, [Grafana](https://grafana.com/docs/), etc.) puedan inspeccionar el tráfico.
-
-#### 5.2.7 Comparativa: X-Cypher vs Enfoques Alternativos
-
-| Aspecto | X-Cypher ([AES-256-GCM](https://csrc.nist.gov/publications/detail/sp/800-38d/final) + [PBKDF2](https://csrc.nist.gov/publications/detail/sp/800-132/final)) | [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) solo | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + TLS | Cifrado a nivel aplicación custom |
-|---------|----------------------------------|-----------|-----------|----------------------------------|
-| **Cifrado payload** | ✅ Sí | ❌ No | ❌ No | ✅ Sí |
-| **Cifrado headers** | ✅ Sí (X-Cypher-Headers) | ❌ No | ❌ No | ❌ No |
-| **Protección contra MITM** | ✅ Defensa en profundidad | ✅ Solo canal | ✅ Solo canal | ✅ |
-| **B2B compatible** | ✅ X-Cypher-Enabled: false | ✅ | ✅ | ❌ Generalmente no |
-| **Latencia extra** | ~2-5ms (Lambda@Edge) | ~0ms | ~0ms | ~10-20ms (por servicio) |
-| **Complejidad operativa** | Baja (Lambda gestionada) | Media (PKI) | Baja | Alta (por servicio) |
-| **Transparencia para servicios** | ✅ Servicios reciben JSON plano | ✅ | ✅ | ❌ Cada servicio descifra |
+**Decisión:** TLS 1.3 + JWT es suficiente para este caso de uso. No sacrificamos seguridad — bancos y hospitales usan la misma combinación.
 
 ### 5.3 Privacidad de Datos — Ley 1581 de 2012 (Colombia)
 
@@ -906,13 +875,26 @@ En este modo:
 | **Derechos ARCO** | Endpoints para exportar/eliminar datos de un cliente |
 | **Notificación brechas** | Sistema de alertas + procedimiento para reportar a SIC (15 días hábiles). La Superintendencia de Industria y Comercio (SIC) es la autoridad colombiana de protección de datos. Si hay una violación de seguridad que exponga datos personales, la ley 1581 exige notificar a la SIC dentro de 15 días hábiles desde que se tuvo conocimiento del incidente. También hay que notificar a los titulares de los datos afectados. Las multas pueden llegar a 2.000 salarios mínimos (~$2.600M COP) |
 | **Minimización** | Solo recolectar datos necesarios para la asesoría |
-| **Cifrado extremo a extremo** | X-Cypher cumple el principio de confidencialidad. Datos cifrados durante todo el tránsito |
+| **Cifrado en tránsito** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) cifra todo el canal. Datos protegidos durante todo el tránsito |
 
 **Pipeline de anonimización antes del LLM:** Antes de que cualquier consulta llegue a [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html), se ejecuta un pipeline que detecta datos personales (nombres, documentos, teléfonos, direcciones) mediante expresiones regulares y reconocimiento de entidades, los reemplaza con tokens anónimos ("Cliente-001", "60 años"), verifica que no haya fugas, y solo entonces envía la consulta anonimizada a Claude. Claude nunca recibe datos personales.
 
 > **Implementación y costo:** Usamos **[Microsoft Presidio](https://microsoft.github.io/presidio/)** (open source, licencia MIT, 8.8K estrellas) como librería Python. **100% gratuito** — sin costo de licencia, sin costo por documento ni por consulta. Corre en el RAG Service como paso previo a la llamada a Bedrock, dentro del mismo contenedor [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) ya presupuestado en las tablas de costos (no añade instancias adicionales ni servicios AWS extra). Detecta 40+ tipos de entidades (nombres, CC, NIT, teléfonos, direcciones, emails, placas). Opcionalmente se puede usar [AWS Comprehend](https://docs.aws.amazon.com/comprehend/latest/dg/what-is.html) para PII como respaldo, pero Presidio es suficiente sin costos variables.
 
-### 5.4 Secret Management
+### 5.4 Mitigación de Alucinaciones
+
+Dado el riesgo legal del sector funerario (una respuesta errónea sobre cobertura de edad o precio puede generar una reclamación), implementamos un sistema de capas para evitar que el asistente invente información:
+
+| Capa | Mecanismo | Detalle |
+|------|-----------|---------|
+| **System Prompt estricto** | Instrucción base del modelo | El prompt de sistema de Claude incluye explícitamente: *"Solo responde con información que exista en los documentos proporcionados. Si no encuentras la respuesta en los documentos, di 'No tengo esa información, consulta con auditoría'. No inventes precios, edades, coberturas ni condiciones. No asumas rangos no especificados."* |
+| **Validación de contexto** | Verificación post-generación | El RAG Service compara la respuesta generada con los chunks recuperados. Si la respuesta contiene información numérica (edades, precios, fechas) que no está en los chunks, fuerza una advertencia al asesor: *"Esta información no pudo ser verificada en los documentos. Consulta con auditoría antes de compartirla."* |
+| **Umbral de confianza en retrieval** | Mínimo de similitud para usar un chunk | Si el chunk recuperado tiene similitud < 0.75 con la consulta, se excluye del contexto. Si tras excluir los de baja confianza el contexto queda vacío, el asistente responde: *"No encontré información suficiente en los documentos cargados. Consulta con auditoría."* |
+| **Fallback por falta de contexto** | Respuesta segura por defecto | Si el pipeline completo no logra armar un contexto con al menos 2 chunks de confianza > 0.75, no se invoca al LLM. El BFF devuelve directamente el mensaje de "No tengo información suficiente" sin consumir Bedrock. |
+
+> **Impacto en costos:** Las validaciones post-generación añaden latencia (~200ms) pero evitan respuestas erróneas con riesgo legal. El fallback por falta de contexto ahorra costos de Bedrock al no invocar al LLM cuando no hay información suficiente.
+
+### 5.5 Secret Management
 
 | Secreto | Almacenamiento | Rotación |
 |---------|---------------|----------|
@@ -1000,7 +982,7 @@ gantt
 | Actividad | Entregable |
 |-----------|------------|
 | Widget [Lit 3](https://lit.dev/docs/) con [Custom Element](https://developer.mozilla.org/en-US/docs/Web/API/Web_components), [Shadow DOM](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM) | Widget embebible ~20KB |
-| [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) + [Lambda@Edge](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge.html) (X-Cypher v1) | Cifrado funcional en QA |
+| [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) + WAF | Seguridad funcional en QA |
 | BFF Service ([FastAPI](https://fastapi.tiangolo.com/)) con [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) | BFF desplegado en QA |
 | **Demo 2:** Widget cargado en host de prueba, login + API cifrada | ✅ |
 
@@ -1026,7 +1008,7 @@ gantt
 
 | Actividad | Entregable |
 |-----------|------------|
-| X-Cypher extremo a extremo (cifrado payload + headers) | Cifrado completo en QA |
+| TLS 1.3 + HSTS + seguridad web completa | Seguridad reforzada en QA |
 | [SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) streaming cifrado | Respuestas en tiempo real cifradas |
 | PII stripping antes de LLM | Privacidad de datos operativa |
 | Refinamiento de prompts + calidad respuestas | Chat listo para piloto |
@@ -1123,7 +1105,6 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ElastiCache (Redis) | Serverless, 0.5 GB | ~$10 | ~$34.500 |
 | S3 + CloudFront | 1 GB, 1K requests | ~$1 | ~$3.450 |
 | KMS + ACM | 2 keys | ~$2 | ~$6.900 |
-| Lambda@Edge | 10K requests/mes | ~$0 | ~$0 (free tier) |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets | ~$60 | ~$207.000 |
 | **Total MVP** | | **~$151/mes** | **~$521.000/mes** |
 
@@ -1156,11 +1137,10 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Step Functions | Ingesta documentos + pipeline KB | ~$5 | ~$17.250 |
 | CloudWatch + X-Ray | Logs + trazas (6× más logs de Bedrock) | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
-| Lambda@Edge | 300K requests/mes | ~$3.00 | ~$10.350 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$1.241/mes** | **~$4.281.500/mes** |
+| **Total Producción** | | **~$1.238/mes** | **~$4.271.150/mes** |
 | **+ QA (paralelo)** | | **~$124/mes** | **~$427.500/mes** |
-| **Total Prod + QA** | | **~$1.365/mes** | **~$4.709.000/mes** |
+| **Total Prod + QA** | | **~$1.362/mes** | **~$4.698.650/mes** |
 
 #### Escalado (500+ asesores)
 
@@ -1177,11 +1157,10 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Step Functions | Ingesta + workflows | ~$20 | ~$69.000 |
 | CloudWatch + X-Ray | Logs + trazas (6× más logs) | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
-| Lambda@Edge | 3M requests/mes | ~$15 | ~$51.750 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$4.189/mes** | **~$14.452.000/mes** |
+| **Total Escalado** | | **~$4.174/mes** | **~$14.400.250/mes** |
 | **+ QA (paralelo)** | | **~$124/mes** | **~$427.500/mes** |
-| **Total Esc + QA** | | **~$4.313/mes** | **~$14.879.500/mes** |
+| **Total Esc + QA** | | **~$4.298/mes** | **~$14.827.750/mes** |
 
 ### 7.2 Proyección Anual
 
@@ -1190,8 +1169,8 @@ Tasa de cambio: $1 USD = $3,450 COP
 | 1-2 | Desarrollo + Fundación (sprints 1-2, solo QA) | ~$428.000/mes | ~$124/mes |
 | 3-4 | MVP parcial (sprints 3-4, QA + prod parcial) | ~$900.000/mes | ~$260/mes |
 | 5-6 | Piloto 5-10 asesores (sprints 5-6, QA + prod reducida) | ~$1.000.000/mes | ~$290/mes |
-| 7-10 | Producción 100 asesores (QA + prod) | ~$4.709.000/mes | ~$1.365/mes |
-| 11-12 | Escalamiento 200-500 (QA + prod) | ~$8.000.000/mes | ~$2.319/mes |
+| 7-10 | Producción 100 asesores (QA + prod) | ~$4.699.000/mes | ~$1.362/mes |
+| 11-12 | Escalamiento 200-500 (QA + prod) | ~$7.900.000/mes | ~$2.290/mes |
 | **Total Año 1** | **Proyección AWS** | **~$36.000.000-44.000.000/año** | **~$10.400-12.800/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
@@ -1355,6 +1334,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 > - **Mantenimiento y soporte (~10-15 hrs/mes):** Es el **esfuerzo estimado** que dedicamos mensualmente, no un límite para el cliente. El cliente puede contactarnos en horario laboral (L-V 8am-6pm) sin límite de horas. Las 10-15 hrs es lo que típicamente ocupamos en bugs, consultas y mejoras. Si se supera consistentemente, se renegocia el plan.
 > - **Precio unificado:** No hay diferencia de mensualidad entre Opción 1 y 2. La única diferencia está en el setup inicial. El mantenimiento de un login no justifica $2M/mes de diferencia.
 > - **Margen de servicio:** Es nuestra utilidad — la diferencia entre el costo del servicio (infra + soporte + herramientas) y lo que cobramos. Típicamente 15-25% en servicios gestionados.
+> - **Ahorro por optimizaciones sujeto a validación en piloto:** El descuento del ~35% (escenario Normal) depende de que los optimizadores —caché semántico y routing inteligente— funcionen correctamente para el caso de uso funerario sin comprometer la calidad emocional de las respuestas. Si durante el piloto se determina que estos optimizadores deben desactivarse parcial o totalmente (porque las respuestas pierden empatía o contexto), el ahorro se reduce o desaparece. En el escenario Pesimista (sin optimizadores), el costo base es de ~$8.3M/mes y el precio se ajustaría en la renovación del contrato.
 
 | Componente | Costo mensual (COP) |
 |------------|:-------------------:|
@@ -1369,7 +1349,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | Margen de servicio (~28%) | ~$2.095.000 |
 | **Precio al cliente** | **$7.500.000** |
 
-> El precio se fija según el plan contratado (tabla 8.2.5). Para el plan Estándar, el precio es **$7.500.000**, que asume escenario de optimización Normal (~35% de ahorro sobre costos base de infraestructura) y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). Si el volumen de consultas supera las 60K/mes, el escenario de optimización resulta menor al estimado, o se procesan más de 100 documentos/mes, el precio se ajusta en la renovación del contrato.
+> El precio se fija según el plan contratado (tabla 8.2.5). Para el plan Estándar, el precio es **$7.500.000**, que asume escenario de optimización Normal (~35% de ahorro sobre costos base de infraestructura) y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). Si durante el piloto los optimizadores (caché semántico, routing) resultan inaplicables por comprometer la calidad emocional de las respuestas, el ahorro se reduce o elimina y el precio se ajusta en la renovación del contrato.
 
 #### 8.2.7 Excedentes y Penalizaciones
 
@@ -1452,7 +1432,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 - AWS KMS Pricing: https://aws.amazon.com/kms/pricing/
 - AWS ACM Pricing: https://aws.amazon.com/acm/pricing/
 - ElastiCache Pricing: https://aws.amazon.com/elasticache/pricing/
-- Lambda@Edge Pricing: https://aws.amazon.com/lambda/pricing/
+- Lambda@Edge Pricing: https://aws.amazon.com/lambda/pricing/ (aplica si se usa para otro propósito)
 
 ### 8.2 Precios Oficiales Azure
 

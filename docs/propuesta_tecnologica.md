@@ -631,7 +631,6 @@ graph LR
 | **MFA** | SMS, TOTP, Biometric | SMS, Voice | Solo SMS |
 | **SSO (SAML/OIDC)** | Sí (Enterprise SSO $0.015/MAU ~$52 COP) | Sí (nativo) | Sí (Identity Platform) |
 | **Custom UI** | Sí (Hosted UI personalizable) | Sí | Limitado |
-| **Presencia LATAM** | sa-east-1 (Sao Paulo) | Brazil South | Firebase global |
 | **Valoración** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 
 **Recomendación: [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** — Mejor balance costo/features, 10K MAU gratis, integración nativa con [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html).

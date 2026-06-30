@@ -25,7 +25,6 @@
 | **Buscador inteligente (RAG)** | [LlamaIndex](https://docs.llamaindex.ai/) - motor de búsqueda aumentada con IA, el estándar de la industria para sistemas de preguntas y respuestas sobre documentos propios | Busca en los documentos para responder con información real. Cada respuesta viene con la fuente de dónde se obtuvo. |
 | **Base de datos de documentos** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) - base de datos que entiende texto | Almacena y organiza los documentos. Cuando nadie la usa, se apaga para ahorrar costos. |
 | **Generación de respuestas** | [Claude Sonnet](https://aws.amazon.com/bedrock/claude/) + [Claude Haiku](https://aws.amazon.com/bedrock/claude/) - modelos de inteligencia artificial de última generación | Sonnet genera respuestas detalladas para preguntas complejas. Haiku responde preguntas simples más rápido y más económico. |
-| **Caché de respuestas** | [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) - memoria de alta velocidad que guarda respuestas temporales | Si dos asesores preguntan lo mismo, la segunda respuesta se entrega en milisegundos sin volver a pagar por IA. |
 | **Infraestructura** | [AWS](https://aws.amazon.com/) - la nube más usada del mundo, sin servidores que administrar | No hay servidores físicos que mantener. |
 | **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) para llaves de cifrado | Todos los datos viajan y se almacenan cifrados. |
 | **Monitoreo** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) - panel de control en tiempo real | Monitoreo en tiempo real. |
@@ -68,7 +67,6 @@ graph TB
         BFF[Lógica del negocio]
         RAG[Buscador inteligente]
         AURORA[(Base de datos)]
-        REDIS[(Caché)]
         BEDROCK[Inteligencia artificial]
         S3[(Almacén de documentos)]
         CF[Distribución global]
@@ -86,7 +84,6 @@ graph TB
     GW --> BFF
     BFF -->|Busca información| RAG
     RAG -->|Consulta documentos| AURORA
-    RAG -->|Verifica caché| REDIS
     RAG -->|Genera respuesta con IA| BEDROCK
 ```
 
@@ -99,7 +96,6 @@ graph TB
         BFF[Lógica del negocio]
         RAG[Buscador inteligente]
         AURORA[(Base de datos)]
-        REDIS[(Caché)]
         BEDROCK[Inteligencia artificial]
         S3[(Almacén de documentos)]
         CF[Distribución global]
@@ -117,7 +113,6 @@ graph TB
     GW --> BFF
     BFF -->|Busca información| RAG
     RAG -->|Consulta documentos| AURORA
-    RAG -->|Verifica caché| REDIS
     RAG -->|Genera respuesta con IA| BEDROCK
 ```
 
@@ -157,7 +152,7 @@ flowchart TB
     subgraph AWS["Infraestructura en la nube"]
         A[Validación de<br/>identidad y permisos]
         B[Comunicación interna<br/>protegida]
-        C[Datos cifrados en<br/>reposo con rotación]
+        C[Anonimización automática]
     end
 
     TLS --> A
@@ -165,7 +160,19 @@ flowchart TB
     B --> C
 ```
 
-**Datos personales:** Antes de llegar a la IA, cualquier información personal (nombres, documentos, teléfonos, direcciones, etc.) se reemplaza con datos anónimos. La IA nunca recibe información personal.
+## 2.4 Privacidad de Datos — Ley 1581 de 2012
+
+No almacenamos datos personales de clientes. El único registro que se guarda son los chats (ya anonimizados) para monitoreo de calidad, por un tiempo definido por el negocio. Antes de llegar a la IA, cualquier información personal (nombres, documentos, teléfonos, direcciones, etc.) se reemplaza con datos anónimos usando un filtro automático. La IA nunca recibe información personal.
+
+Cumplimos la ley así:
+
+| Requisito de la ley | Cómo lo cumplimos |
+|-|-|
+| **Consentimiento** | El asesor informa al cliente que la conversación es asistida por IA. No se pide autorización para guardar — no se almacenan datos personales |
+| **Propósito definido** | La IA solo asiste en la asesoría comercial. No se entrenan modelos ni se comparten datos con terceros |
+| **Datos mínimos** | No almacenamos datos personales. Los chats de monitoreo se guardan sin información que identifique al cliente |
+| **Datos protegidos** | La información viaja cifrada (TLS 1.3). Los datos personales se eliminan automáticamente antes de llegar a la IA o guardarse |
+
 
 ---
 

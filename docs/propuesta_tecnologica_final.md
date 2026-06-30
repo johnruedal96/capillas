@@ -146,6 +146,27 @@ flowchart TB
 
 **Fácil de mantener:** Cuando cambien tarifas, productos o condiciones, se sube el documento actualizado al gestor documental. El sistema lo procesa y el chat empieza a usar la nueva información de inmediato.
 
+## 2.3 Flujo de Seguridad
+
+```mermaid
+flowchart TB
+    FRONT[App o web<br/>Chat / Gestor documental]
+
+    FRONT --> TLS[TLS 1.3 - Todo viaja cifrado]
+
+    subgraph AWS["Infraestructura en la nube"]
+        A[Validación de<br/>identidad y permisos]
+        B[Comunicación interna<br/>protegida]
+        C[Datos cifrados en<br/>reposo con rotación]
+    end
+
+    TLS --> A
+    A --> B
+    B --> C
+```
+
+**Datos personales:** Antes de llegar a la IA, cualquier información personal (nombres, documentos, teléfonos, direcciones, etc.) se reemplaza con datos anónimos. La IA nunca recibe información personal.
+
 ---
 
 *Documento en construcción. Secciones se agregarán progresivamente.*

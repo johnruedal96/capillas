@@ -19,7 +19,8 @@
 | Capa | Tecnología | Por qué es importante |
 |------|-----------|----------------------|
 | **Widget (chat en web)** | [Lit 3](https://lit.dev/docs/) - componente web, compatible con cualquier navegador moderno. | Se actualiza desde la nube. Funciona en cualquier dispositivo. |
-| **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) - sistema de inicio de sesión gestionado por AWS | Cada asesor tiene su propio usuario y contraseña. Se puede activar doble factor de autenticación. |
+| **Gestor documental** | Panel web para carga y administración de documentos. | El chat funciona con la información que se cargue aquí. |
+| **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) - sistema de login gestionado por AWS | Cada asesor tiene su propio usuario y contraseña. Se puede activar doble factor de autenticación. |
 | **Backend (lógica del negocio)** | [FastAPI](https://fastapi.tiangolo.com/) (Python) + [gRPC](https://grpc.io/docs/) - tecnología moderna de APIs, la misma que usan empresas como Uber y Netflix | Procesa cada consulta en milisegundos. Soporta cientos de asesores simultáneos. |
 | **Buscador inteligente (RAG)** | [LlamaIndex](https://docs.llamaindex.ai/) - motor de búsqueda aumentada con IA, el estándar de la industria para sistemas de preguntas y respuestas sobre documentos propios | Busca en los documentos para responder con información real. Cada respuesta viene con la fuente de dónde se obtuvo. |
 | **Base de datos de documentos** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) - base de datos que entiende texto | Almacena y organiza los documentos. Cuando nadie la usa, se apaga para ahorrar costos. |
@@ -42,6 +43,84 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 
 ---
 
+## 2. Arquitectura del Sistema
 
+### 2.1 Modalidades de Despliegue
+
+Existen **dos formas** de implementarlo:
+
+| Aspecto | Opción 1 - Widget solo | Opción 2 - App completa |
+|---------|----------------------|------------------------|
+| **¿Quién pone la página web?** | Capillas - su web actual | Nosotros - aplicación web liviana |
+| **¿Quién maneja el login?** | Capillas - su propio login | Nosotros |
+| **¿Qué tiene que hacer Capillas?** | Agregar dos líneas de código en su web: una para el chat y otra para el gestor documental. El login de Capillas protege ambos. | Nada - nosotros manejamos todo |
+| **¿Muestra pantalla de login?** | No - el usuario ya está autenticado por Capillas | Sí - nuestra app abre una ventana de login y protege ambos componentes |
+| **¿Qué tan difícil es implementar?** | **Mínimo** - Agrega un script | **Medio** - Requiere configurar usuarios y permisos iniciales |
+
+> **¿Cuál elegir?** Si ya se tiene una página web y sistema de login, la Opción 1 es más rápida y económica. Si no se tiene o se quiere simplificar, la Opción 2 incluye todo listo.
+
+**Opción 1 — Widget solo (Capillas ya tiene login):**
+
+```mermaid
+graph TB
+    subgraph AWS["Infraestructura en la nube"]
+        GW[Entrada segura]
+        BFF[Lógica del negocio]
+        RAG[Buscador inteligente]
+        AURORA[(Base de datos)]
+        REDIS[(Caché)]
+        BEDROCK[Inteligencia artificial]
+        S3[(Almacén de documentos)]
+        CF[Distribución global]
+    end
+
+    WIDGET[Widget de chat]
+    GESTOR[Gestor documental]
+    HOST[Web existente]
+
+    HOST -->|Carga los componentes| CF
+    HOST -->|Login de Capillas| WIDGET
+    HOST -->|Login de Capillas| GESTOR
+    WIDGET -->|Consulta| GW
+    GESTOR -->|Sube documentos| S3
+    GW --> BFF
+    BFF -->|Busca información| RAG
+    RAG -->|Consulta documentos| AURORA
+    RAG -->|Verifica caché| REDIS
+    RAG -->|Genera respuesta con IA| BEDROCK
+```
+
+**Opción 2 — App completa (Nosotros manejamos todo):**
+
+```mermaid
+graph TB
+    subgraph AWS["Infraestructura en la nube"]
+        GW[Entrada segura]
+        BFF[Lógica del negocio]
+        RAG[Buscador inteligente]
+        AURORA[(Base de datos)]
+        REDIS[(Caché)]
+        BEDROCK[Inteligencia artificial]
+        S3[(Almacén de documentos)]
+        CF[Distribución global]
+    end
+
+    WIDGET[Widget de chat]
+    GESTOR[Gestor documental]
+    APP[Nueva app]
+
+    APP -->|Carga los componentes| CF
+    APP -->|Login con cognito| WIDGET
+    APP -->|Login con cognito| GESTOR
+    WIDGET -->|Consulta| GW
+    GESTOR -->|Sube documentos| S3
+    GW --> BFF
+    BFF -->|Busca información| RAG
+    RAG -->|Consulta documentos| AURORA
+    RAG -->|Verifica caché| REDIS
+    RAG -->|Genera respuesta con IA| BEDROCK
+```
+
+---
 
 *Documento en construcción. Secciones se agregarán progresivamente.*

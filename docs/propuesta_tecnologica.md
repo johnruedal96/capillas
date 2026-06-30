@@ -614,6 +614,31 @@ graph LR
 5. **Rollback automático**: si health check falla > 3 veces en 2 minutos
 6. **Monitoreo post-deploy**: [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) alarms + Slack notification
 
+### 3.5 Pipeline de Evaluación de Modelo (RAGAS)
+
+Para garantizar la calidad y confiabilidad de las respuestas del asistente —crítico en el sector funerario donde un error en precios, edades o coberturas puede tener implicaciones legales— implementamos un pipeline de evaluación automatizada basado en **RAGAS** (RAG Assessment) y **DeepEval**.
+
+**Métricas de evaluación:**
+
+| Métrica | Qué mide | Threshold | Por qué es crítica |
+|---------|----------|-----------|-------------------|
+| **Faithfulness** | Afirmaciones generadas vs documentos recuperados | > 0.95 | Un precio o condición inventado = riesgo legal |
+| **Context Precision** | Los documentos relevantes aparecen primero | > 0.90 | El asesor debe recibir la info correcta rápido |
+| **Answer Relevancy** | La respuesta responde directamente a la consulta | > 0.85 | Evita respuestas genéricas o evasivas |
+| **Context Recall** | El retrieval encontró todos los documentos necesarios | > 0.80 | No omitir información relevante |
+| **Regulatory Compliance** | Cumplimiento normativa funeraria colombiana | 100% | Métrica personalizada para el dominio |
+
+**Arquitectura del pipeline:**
+
+El sistema opera en dos modalidades:
+
+1. **CI Gate (cada PR/deploy):** DeepEval sobre dataset semilla de 100-200 ejemplos (casos felices, bordes, adversariales). Usa Claude Haiku como judge (rápido, económico, ~$0.01-0.02/ejecución). Si Faithfulness < 0.95 o Context Precision < 0.90, **bloquea el deploy**. Tiempo estimado: < 3 minutos.
+
+2. **Manual Sweep (bajo demanda):** RAGAS sobre dataset de 500-2000 ejemplos. Se ejecuta **solo cuando un humano lo dispara** (ideal antes de un release mayor, ante una queja de calidad, o después de actualizar el KB). Usa Claude Haiku como judge default por costo (~$0.50-1.50/ejecución completa). Opcionalmente se puede cambiar a Claude Sonnet para una validación más profunda (~$2-5/ejecución). Genera reporte con métricas P50, P90, P99. Tiempo estimado: 15-30 minutos.
+
+> **Costo de ejecución:** El pipeline consume tokens de LLM (Haiku para CI gate y default en manual sweep). En el **Modelo A** (el cliente administra su nube), los costos de ejecución corren por cuenta del cliente. En el **Modelo B** (servicio gestionado), los costos son marginales (~$0.01-0.02 por CI gate + ~$0.50-1.50 por cada ejecución manual) y se absorben sin impacto en la mensualidad.
+
+
 ---
 
 ## 4. Comparativa Cloud Provider
@@ -1241,7 +1266,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 | Frontend (Widget Lit 3) | ✅ Desarrollo completo | ✅ Desarrollo completo |
 | App anfitriona SPA con login | ❌ A cargo del cliente | ✅ Desarrollo completo |
 | Backend (BFF, RAG, KB, Analytics) | ✅ Desarrollo completo | ✅ Desarrollo completo |
-| Infraestructura AWS ([Terraform](https://developer.hashicorp.com/terraform/docs)) | ✅ Código IaC + manual de deploy | ✅ Código IaC + manual de deploy |
+| Infraestructura AWS | ❌ A cargo del cliente (cuenta AWS) | ❌ A cargo del cliente (cuenta AWS) |
 | CI/CD (GitHub Actions) | ✅ Pipeline completo | ✅ Pipeline completo |
 | Autenticación ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749)) | ❌ El cliente usa su propio auth | ✅ Configuración completa |
 | Widget + BFF + RAG integrados | ✅ End-to-end | ✅ End-to-end |
@@ -1253,6 +1278,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 #### 8.1.2 Estimación de Esfuerzo y Costo
 
 > **Aclaración importante:** En el Modelo A, el cobro es **exclusivamente por el desarrollo del software**. El cliente crea y paga su propia cuenta de AWS directamente — la infraestructura es 100% responsabilidad del cliente. Nosotros entregamos el código fuente y documentación técnica, pero **no realizamos labores de DevOps ni operamos la infraestructura cloud**. El cliente es libre de usar los servicios y proveedores cloud que prefiera, no necesariamente los propuestos en este documento. Nuestro desarrollo se adaptará a la nube y servicios que el cliente seleccione.
+> **Pipeline de evaluación de modelo:** El desarrollo del sistema de evaluación continua (RAGAS + DeepEval) está **incluido en el precio de desarrollo**. Los **costos de ejecución** del pipeline (tokens de LLM para el judge, cómputo AWS) corren por cuenta de Capillas de la Fe, ya que el pipeline se ejecuta sobre su infraestructura AWS. Esto aplica tanto para el CI gate (cada PR) como para el manual sweep (bajo demanda).
 
 | Duración | Opción | Horas/sem | Total horas | Precio (COP) | Equivale a ~$/hr* |
 |----------|--------|-----------|-------------|--------------|-------------------|
@@ -1274,6 +1300,12 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 > - 4 meses ($48M) = **$12M/mes** — justo por debajo de la media de un perfil multidisciplinario
 > - Si se contrataran por separado: desarrollador (~$8M/mes) + devops (~$9M/mes) + arquitecto (~$10M/mes) + tester (~$6M/mes) = **~$33M/mes**
 > - El ahorro para el cliente es de ~64% vs contratar 4 personas distintas
+>
+> **¿Cómo se compara con el mercado colombiano?** Según referencias del sector consultadas en 2026:
+> - Sistema RAG corporativo en Colombia: $25M - $70M COP (Gulupa Digital)
+> - Agente autónomo con integraciones: $17M - $52M COP (Consolidación Digital)
+> - Agente IA avanzado: $7M - $15M+ COP (JortegaWD)
+> - Nuestro precio para un **sistema completo** (widget + 4 microservicios + KB Admin + CI/CD + pipeline de evaluación) está dentro del rango de mercado y representa un ahorro significativo vs contratar los 4 roles técnicos por separado.
 
 #### 8.1.3 Flujo de Pagos Sugerido
 
@@ -1313,22 +1345,22 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | **Mes 2** | Mensualidad | **$4.500.000** | Desarrollo continúa (sprints 3-4) |
 | **Mes 3** | Mensualidad | **$4.500.000** | Sprint 5: MVP funcional en QA |
 | **Mes 4** | Mensualidad | **$4.500.000** | Sprint 6: Piloto 5-10 asesores |
-| **Mes 5-12** | Mensualidad | **$7.500.000/mes** | Operación continua + mejoras |
+| **Mes 5-12** | Mensualidad | **$5.500.000/mes** | Operación continua + mejoras |
 
-> **Mensualidad reducida durante desarrollo:** Durante los meses 2-4 no hay asesores reales consumiendo recursos de producción — solo infraestructura QA (~$428K-$1M/mes vs $4.7M/mes en producción). Ofrecemos una mensualidad reducida de **$4.500.000/mes** para los meses 2-4. A partir del mes 5 (producción real) aplica la mensualidad completa de $7.500.000. Esto reduce el año 1 en ~$9M.
-| **Total Año 1 (Op. 1)** | | **$15.000.000 + (3 × $4.500.000) + (8 × $7.500.000) = $88.500.000** | Setup + mensualidades |
-| **Total Año 1 (Op. 2)** | | **$18.500.000 + (3 × $4.500.000) + (8 × $7.500.000) = $92.000.000** | Setup + mensualidades |
+> **Mensualidad reducida durante desarrollo:** Durante los meses 2-4 no hay asesores reales consumiendo recursos de producción — solo infraestructura QA (~$428K-$1M/mes vs $4.7M/mes en producción). Ofrecemos una mensualidad reducida de **$4.500.000/mes** para los meses 2-4. A partir del mes 5 (producción real) aplica la mensualidad completa de $5.500.000. Esto reduce el año 1 en ~$9M.
+| **Total Año 1 (Op. 1)** | | **$15.000.000 + (3 × $4.500.000) + (8 × $5.500.000) = $72.500.000** | Setup + mensualidades |
+| **Total Año 1 (Op. 2)** | | **$18.500.000 + (3 × $4.500.000) + (8 × $5.500.000) = $76.000.000** | Setup + mensualidades |
 
 #### 8.2.3 Qué Pasa Si el Cliente Cancela Antes de los 12 Meses
 
-> **¿Cómo funciona la penalización?** Si el cliente cancela antes de los 12 meses, nosotros perdemos la inversión inicial (setup, desarrollo, capacidad reservada) y el ingreso esperado. La penalización es el **50% del valor de los meses restantes** del contrato. Por ejemplo, si el cliente cancela en el mes 3 (quedan 9 meses: mes 4 a $4.5M + meses 5-12 a $7.5M = $64.5M), paga $32.25M como compensación. Esto es estándar en servicios B2B con inversión inicial alta.
+> **¿Cómo funciona la penalización?** Si el cliente cancela antes de los 12 meses, nosotros perdemos la inversión inicial (setup, desarrollo, capacidad reservada) y el ingreso esperado. La penalización es el **50% del valor de los meses restantes** del contrato. Por ejemplo, si el cliente cancela en el mes 3 (quedan 9 meses: mes 4 a $4.5M + meses 5-12 a $5.5M = $48.5M), paga $24.25M como compensación. Esto es estándar en servicios B2B con inversión inicial alta.
 
 | Cancelación en mes | Ya pagó (COP) | Penalización (COP) | Total recuperado (COP) |
 |-------------------|---------------|-------------------|------------------------|
-| Mes 1 | $15.000.000 / $18.500.000 | 50% × $73.5M (meses 2-12) = **$36.750.000** | **$51.750.000 / $55.250.000** |
-| Mes 3 | $24.000.000 / $27.500.000 | 50% × $64.5M (meses 4-12) = **$32.250.000** | **$56.250.000 / $59.750.000** |
-| Mes 6 | $43.500.000 / $47.000.000 | 50% × $45M (meses 7-12) = **$22.500.000** | **$66.000.000 / $69.500.000** |
-| Mes 12 | $88.500.000 / $92.000.000 | $0 (completó el contrato) | **$88.500.000 / $92.000.000** |
+| Mes 1 | $15.000.000 / $18.500.000 | 50% × $57.5M (meses 2-12) = **$28.750.000** | **$43.750.000 / $47.250.000** |
+| Mes 3 | $24.000.000 / $27.500.000 | 50% × $48.5M (meses 4-12) = **$24.250.000** | **$48.250.000 / $51.750.000** |
+| Mes 6 | $34.000.000 / $37.500.000 | 50% × $33M (meses 7-12) = **$16.500.000** | **$50.500.000 / $54.000.000** |
+| Mes 12 | $72.500.000 / $76.000.000 | $0 (completó el contrato) | **$72.500.000 / $76.000.000** |
 
 #### 8.2.4 Inversión Inicial (Setup) — Incluido en el Mes 0
 
@@ -1351,38 +1383,56 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 | Plan | Conversaciones/mes | Precio mensual (COP) | Costo AWS estimado (COP) | Ideal para |
 |------|-------------------|:--------------------:|:------------------------:|------------|
-| **Básico** | Hasta 5.000 | **$5.000.000 - $6.000.000** | ~$1.5M - $2M | Piloto, < 10 asesores |
-| **Estándar** | Hasta 60.000 | **$7.500.000** | ~$3.5M | Producción, ~100 asesores |
+| **Básico** | Hasta 5.000 | **$3.500.000 - $4.500.000** | ~$1.5M - $2M | Piloto, < 10 asesores |
+| **Estándar** | Hasta 60.000 | **$5.500.000** | ~$3.5M | Producción, ~100 asesores |
 | **Premium** | Hasta 300.000 | **$10.000.000 - $12.000.000** | ~$7M - $10M | Escalado, ~500 asesores |
 | **Ilimitado** | Sin límite | **$15.000.000 - $18.000.000** | ~$10M - $15M | Gran volumen |
 
-> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción + QA), mantenimiento de microservicios, soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.8), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
+> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción), mantenimiento de microservicios, soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.9), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
 
 #### 8.2.6 Desglose de Costos del Plan Estándar
 
 > **Notas:**
+> - **Ambiente QA no incluido:** El ambiente de pruebas y staging es **costo interno del proveedor** — no se traslada al cliente. El cliente paga exclusivamente por la infraestructura de producción que sus asesores utilizan.
+> - **Pipeline de evaluación incluido:** El sistema de evaluación continua (RAGAS + DeepEval) es parte de nuestro control de calidad y está incluido en la mensualidad sin costo adicional para el cliente.
 > - **Costo AWS con buffer:** Incluye un **buffer de ~15%** sobre el costo estimado de infraestructura AWS para cubrir fluctuaciones en consumo de asesores, variación cambiaria USD/COP, o picos inesperados en Bedrock. Si el costo real es menor, el ahorro se traslada al mes siguiente. Si es mayor, el buffer lo absorbe.
-> - **Mantenimiento y soporte (~10-15 hrs/mes):** Es el **esfuerzo estimado** que dedicamos mensualmente, no un límite para el cliente. El cliente puede contactarnos en horario laboral (L-V 8am-6pm) sin límite de horas. Las 10-15 hrs es lo que típicamente ocupamos en bugs, consultas y mejoras. Si se supera consistentemente, se renegocia el plan.
-> - **Precio unificado:** No hay diferencia de mensualidad entre Opción 1 y 2. La única diferencia está en el setup inicial. El mantenimiento de un login no justifica $2M/mes de diferencia.
-> - **Margen de servicio:** Es nuestra utilidad — la diferencia entre el costo del servicio (infra + soporte + herramientas) y lo que cobramos. Típicamente 15-25% en servicios gestionados.
-> - **Ahorro por optimizaciones sujeto a validación en piloto:** El descuento del ~35% (escenario Normal) depende de que los optimizadores —caché semántico y routing inteligente— funcionen correctamente para el caso de uso funerario sin comprometer la calidad emocional de las respuestas. Si durante el piloto se determina que estos optimizadores deben desactivarse parcial o totalmente (porque las respuestas pierden empatía o contexto), el ahorro se reduce o desaparece. En el escenario Pesimista (sin optimizadores), el costo base es de ~$8.3M/mes y el precio se ajustaría en la renovación del contrato.
+> - **Precio unificado:** No hay diferencia de mensualidad entre Opción 1 y 2. La única diferencia está en el setup inicial.
+> - **Ahorro por optimizaciones sujeto a validación en piloto:** Las optimizaciones (caché semántico y routing inteligente) están incluidas. Si durante el piloto se determina que deben desactivarse, el precio se ajusta.
 
 | Componente | Costo mensual (COP) |
 |------------|:-------------------:|
-| Infraestructura AWS (prod 100 ases + QA + buffer 15%) | ~$5.415.000 |
+| Infraestructura AWS producción (100 ases, escenario Normal + buffer 15%) | ~$3.400.000 |
 | Dominio + CDN + SSL/TLS | ~$100.000 |
-| Mantenimiento y soporte (horario laboral, sin límite de horas) | ~$1.800.000 |
-| Monitoreo + actualizaciones de seguridad | ~$500.000 |
-| Gestión de KB Admin + pipeline de ingesta | ~$500.000 |
-| **Subtotal costo base** | **~$8.315.000** |
-| Ahorro por optimizaciones (ver sección 6 — escenario Normal ~35%) | ~$2.910.000 |
-| **Subtotal costo con optimización** | **~$5.405.000** |
-| Margen de servicio (~28%) | ~$2.095.000 |
-| **Precio al cliente** | **$7.500.000** |
+| **Honorarios de gestión técnica** (soporte, mantenimiento, monitoreo, actualizaciones de seguridad, gestión KB, utilidad) | **~$2.000.000** |
+| **Precio al cliente** | **$5.500.000** |
 
-> El precio se fija según el plan contratado (tabla 8.2.5). Para el plan Estándar, el precio es **$7.500.000**, que asume escenario de optimización Normal (~35% de ahorro sobre costos base de infraestructura) y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). Si durante el piloto los optimizadores (caché semántico, routing) resultan inaplicables por comprometer la calidad emocional de las respuestas, el ahorro se reduce o elimina y el precio se ajusta en la renovación del contrato.
+> **¿Qué incluyen los honorarios de gestión técnica?**
+> - **Soporte en horario laboral (L-V 8am-6pm):** Resolución de dudas, bugs, y solicitudes del equipo de Capillas. Sin límite de horas. Fuera de este horario aplica cargo extra ($120.000/hr, ver sección 8.2.9).
+> - **Mantenimiento post-estabilización:** Esfuerzo estimado de ~6-10 hrs/mes para correcciones, mejoras menores, y ajustes que surjan con el uso real.
+> - **Monitoreo 24/7 automatizado:** Alertas de disponibilidad, errores, y degradación en los 4 microservicios (BFF, RAG, KB, Analytics). No se monitorea manualmente — el sistema alerta cuando algo pasa y nosotros respondemos.
+> - **Actualizaciones de seguridad:** Dependencias (npm, pip), parches críticos de contenedores, renovación de certificados SSL. Se aplican a medida que los proveedores liberan parches, no en releases mensuales fijos.
+> - **Gestión de KB Admin:** Procesamiento de los documentos que el cliente sube a la plataforma — chunking, embedding, y carga a pgvector. Hasta 100 documentos/mes.
+> - **Utilidad incluida:** Todo lo anterior incluye nuestro margen. No hay cargos ocultos ni markup sobre AWS.
+>
+> El precio del plan Estándar ($5.500.000) asume escenario de optimización Normal sobre costos de infraestructura AWS y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). El ambiente QA, el pipeline de evaluación de modelo y las herramientas de monitoreo son costos internos del proveedor. Si durante el piloto los optimizadores resultaran inaplicables, el precio se ajusta en la renovación.
 
-#### 8.2.7 Mecanismo de Ajuste Cambiario (TRM)
+
+
+#### 8.2.7 Comparativa de Mercado
+
+Para referencia, estos son los precios de mercado de soluciones comparables en Colombia (2026):
+
+| Competidor | Producto | Precio/mes | Diferenciación |
+|------------|----------|-----------|----------------|
+| **FunerarIA** | IA para funerarias (SaaS) | ~$5.170.000 (Professional) | Pre-build, 7 agentes, 200 casos/mes |
+| **Agentik** | Agente IA Colombia | $749.000/mes | WhatsApp, 1.000 conv/mes, bot simple |
+| **Mentora** | Agente IA + integraciones | Desde $190.000/mes (mantenimiento) | Implementación desde $4.890.000 |
+| **Gulupa Digital** | Sistema RAG corporativo | $3-10M infra + $2-6M mantenimiento | Solo RAG, sin widget ni KB Admin |
+| **Nuestra propuesta** | RAG + widget + KB + BFF + 60K conv/mes | **$5.500.000** | **Full custom, 100 asesores, pipeline evaluación** |
+
+> Nuestra solución es la única que combina: widget embebible custom, 4 microservicios, KB Admin, pipeline de evaluación continua y soporte gestionado — todo por un precio competitivo frente a soluciones parciales del mercado.
+
+#### 8.2.8 Mecanismo de Ajuste Cambiario (TRM)
 
 Todos los costos de infraestructura AWS se facturan en **USD** (dólares americanos). Nuestra tarifa al cliente está denominada en **COP** (pesos colombianos). Para manejar la variación cambiaria ofrecemos dos opciones:
 
@@ -1392,11 +1442,11 @@ Fijamos el precio base del servicio en **USD** y facturamos en COP aplicando la 
 
 | Aspecto | Detalle |
 |---------|---------|
-| **Precio base** | **$2,174 USD/mes** — equivalente a $7.500.000 COP a TRM $3,450 |
-| **Facturación** | $2,174 USD × TRM del día hábil anterior a la fecha de facturación |
+| **Precio base** | **$1,594 USD/mes** — equivalente a $5.500.000 COP a TRM $3,450 |
+| **Facturación** | $1,594 USD × TRM del día hábil anterior a la fecha de facturación |
 | **Frecuencia** | Mensual, día 1 de cada mes |
 | **Fuente TRM** | [Banco de la República](https://www.banrep.gov.co/es/estadisticas/trm) — tasa representativa del mercado del último día hábil |
-| **Ejemplo** | TRM a $4,200 → factura = $2,174 × 4,200 = **$9,130,800 COP**. TRM a $3,200 → factura = $2,174 × 3,200 = **$6,956,800 COP** |
+| **Ejemplo** | TRM a $4,200 → factura = $1,594 × 4,200 = **$6,694,800 COP**. TRM a $3,200 → factura = $1,594 × 3,200 = **$5,100,800 COP** |
 | **Riesgo para el cliente** | El monto en COP varía cada mes, pero el precio real en USD es fijo y conocido de antemano |
 | **Ventaja** | Justo para ambas partes: el precio refleja el costo real del servicio sin que ninguna parte especule con la TRM |
 
@@ -1408,26 +1458,26 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 
 | Aspecto | Detalle |
 |---------|---------|
-| **Precio base** | $7.500.000 COP/mes — fijo **mientras la TRM se mantenga entre $3,100 y $3,795** (rango de ±10% sobre $3,450) |
+| **Precio base** | $5.500.000 COP/mes — fijo **mientras la TRM se mantenga entre $3,105 y $3,795** (rango de ±10% sobre $3,450) |
 | **Ajuste automático** | Si la TRM supera $3,795, el precio aumenta en la misma proporción que el excedente sobre $3,795 |
-| **Fórmula** | `Precio = $7.500.000 + (TRM_actual - 3,795) × $630` |
+| **Fórmula** | `Precio = $5.500.000 + (TRM_actual - 3,795) × $462` |
 | **Frecuencia de ajuste** | Mensual, basado en la TRM promedio de los últimos 3 meses (para evitar picos puntuales) |
-| **Ajuste a la baja** | Si la TRM baja de $3,100, el precio se reduce con la misma fórmula (simétrico) |
+| **Ajuste a la baja** | Si la TRM baja de $3,105, el precio se reduce con la misma fórmula (simétrico) |
 
 **Ejemplos:**
 | TRM del mes | Cálculo | Precio (COP) |
 |:-----------:|---------|:------------:|
-| $3,450 | Sin ajuste (dentro de la franja) | **$7,500,000** |
-| $3,600 | Sin ajuste (dentro de la franja de ±10%) | **$7,500,000** |
-| $4,200 | $7.5M + (4,200 - 3,795) × $630 = $7.5M + $255,150 | **$7,755,150** |
-| $4,800 | $7.5M + (4,800 - 3,795) × $630 = $7.5M + $633,150 | **$8,133,150** |
-| $3,000 | $7.5M - (3,100 - 3,000) × $630 = $7.5M - $63,000 | **$7,437,000** |
+| $3,450 | Sin ajuste (dentro de la franja) | **$5,500,000** |
+| $3,600 | Sin ajuste (dentro de la franja de ±10%) | **$5,500,000** |
+| $4,200 | $5.5M + (4,200 - 3,795) × $462 = $5.5M + $187,110 | **$5,687,110** |
+| $4,800 | $5.5M + (4,800 - 3,795) × $462 = $5.5M + $464,310 | **$5,964,310** |
+| $3,000 | $5.5M - (3,105 - 3,000) × $462 = $5.5M - $48,510 | **$5,451,490** |
 
-**Detalle de la fórmula:** El factor $630 representa el precio del plan Estándar ($7.5M) dividido por la TRM base ($3,450), multiplicado por un factor de cobertura: `$7,500,000 / $3,450 = $2,174 USD` → por cada peso que sube la TRM sobre el umbral, el ajuste es de `$2,174 × 0.29 = $630 COP`. El factor 0.29 refleja que los costos AWS representan ~29% del precio al cliente (el resto es margen + mantenimiento, que son en COP).
+**Detalle de la fórmula:** El factor $462 representa el precio del plan Estándar ($5.5M) dividido por la TRM base ($3,450), multiplicado por un factor de cobertura: `$5,500,000 / $3,450 = $1,594 USD` → por cada peso que sube la TRM sobre el umbral, el ajuste es de `$1,594 × 0.29 = $462 COP`. El factor 0.29 refleja que los costos AWS representan ~29% del precio al cliente (el resto es margen + mantenimiento, que son en COP).
 
 > **¿Cuál opción recomendamos?** Para un contrato de 12 meses con un cliente institucional en Colombia, la **Opción B** ofrece el mejor balance: el cliente tiene predictibilidad en ±10% de TRM (que cubre el ~80% de los escenarios históricos), y el integrador está protegido contra movimientos extremos del dólar. Si el cliente prefiere máxima simplicidad, la **Opción A** es la más transparente.
 
-#### 8.2.8 Excedentes y Penalizaciones
+#### 8.2.9 Excedentes y Penalizaciones
 
 | Concepto | Costo adicional |
 |----------|-----------------|
@@ -1437,7 +1487,7 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 | Personalización adicional de features | Cotización aparte |
 | Capacitación adicional (sesión de 2 horas) | $250.000 COP/sesión |
 
-#### 8.2.9 SLA (Acuerdo de Nivel de Servicio)
+#### 8.2.10 SLA (Acuerdo de Nivel de Servicio)
 
 | Métrica | Compromiso |
 |---------|-----------|
@@ -1448,7 +1498,7 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 | Frecuencia de backups | Diario automático |
 | Ventana de mantenimiento programado | Domingos 2am-4am. Durante esta ventana se realizan: actualizaciones de seguridad, parches de dependencias, optimización de base de datos (VACUUM, reindex), limpieza de logs, renovación de certificados, y despliegues programados |
 
-#### 8.2.10 Entregables y Calendario de Pagos (Modelo B)
+#### 8.2.11 Entregables y Calendario de Pagos (Modelo B)
 
 > **Entregables del Modelo A:** En el Modelo A (desarrollo por proyecto), los entregables son los mismos que en el Modelo B (ver tabla abajo), pero el pago se realiza por hitos según la tabla de la sección 8.1.3. Se entrega código fuente completo y documentación técnica. **No se incluye infraestructura como código (Terraform) ni pipeline CI/CD**, ya que en este modelo el cliente es 100% responsable de la infraestructura y DevOps. El cliente NO recibe soporte continuo ni administración de infraestructura.
 
@@ -1471,9 +1521,9 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 | Aspecto | Modelo A (Desarrollo) | Modelo B<br/>(Widget o App completa) |
 |---------|----------------------|:-----------------------------------:|
 | **Inversión inicial** | $48M (todo desarrollo) | **$15M** (Op. 1) / **$18.5M** (Op. 2) |
-| **Costo mensual** | $0 (solo desarrollo) | **$7.500.000/mes** (único para ambas opciones) |
-| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$25M = **~$73M** | **$88.5M** (Op. 1) / **$92M** (Op. 2) |
-| **Costo año 2+** | AWS: ~$56M + soporte externo: ~$108M = **~$164M/año** | **$90M/año** |
+| **Costo mensual** | $0 (solo desarrollo) | **$5.500.000/mes** (único para ambas opciones) |
+| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$25M = **~$73M** | **$81M** (Op. 1) / **$84.5M** (Op. 2) |
+| **Costo año 2+** | AWS: ~$56M + soporte externo: ~$108M = **~$164M/año** | **$66M/año** |
 | **App anfitriona** | ❌ A cargo del cliente | ✅ Incluida en Op. 2 / ❌ A cargo del cliente en Op. 1 |
 | **Auth / Login** | ❌ A cargo del cliente | ✅ Nosotros (Op. 2) / ❌ A cargo del cliente (Op. 1) |
 | **Soporte continuo** | ❌ No incluido | ✅ Incluido |
@@ -1486,8 +1536,8 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 
 | Si Capillas... | Recomendación |
 |---------------|---------------|
-| **Ya tiene app web con login propio** | **Modelo B — Opción 1** (~$15M setup + $7.5M/mes). Solo instala los widgets y pasa el token. |
-| **No tiene app ni sistema de auth** | **Modelo B — Opción 2** (~$18.5M setup + $7.5M/mes). Incluye app SPA con login completo. |
+| **Ya tiene app web con login propio** | **Modelo B — Opción 1** (~$15M setup + $5.5M/mes). Solo instala los widgets y pasa el token. |
+| **No tiene app ni sistema de auth** | **Modelo B — Opción 2** (~$18.5M setup + $5.5M/mes). Incluye app SPA con login completo. |
 | **Quiere tener el control total de su infraestructura** | **Modelo A** ($48M upfront). Recibe el código y lo opera internamente. |
 
 > 💡 **Periodo de prueba:** Si el cliente duda, ofrecemos **3 meses de prueba** con contrato mensual. Si continúa, firma el anual. Si no, recuperamos costos de setup + AWS.
@@ -1537,6 +1587,8 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 - OAuth 2.1 BCP (RFC 9700): https://datatracker.ietf.org/doc/rfc9700/
 - OpenTelemetry Documentation: https://opentelemetry.io/docs/
 
+- RAGAS Evaluation: https://docs.ragas.io/
+- DeepEval (Confident AI): https://docs.confident-ai.com/
 ### 8.5 Seguridad y Cumplimiento
 
 - OWASP Top 10: https://owasp.org/www-project-top-ten/

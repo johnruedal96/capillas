@@ -123,4 +123,29 @@ graph TB
 
 ---
 
+## 2.2 Flujo del Sistema
+
+```mermaid
+flowchart TB
+    subgraph CARGA["Flujo de carga de documentos"]
+        A[1. Administrador sube<br/>documentos al sistema] --> B[2. Sistema procesa<br/>automáticamente]
+        B --> C[3. Documentos indexados<br/>y listos para consultar]
+    end
+
+    subgraph CHAT["Flujo del chat"]
+        D[1. Asesor hace una<br/>pregunta en el chat] --> E[2. Sistema busca en<br/>los documentos]
+        E --> F{3. Encuentra<br/>información útil?}
+        F -->|Sí| G[4. IA genera respuesta<br/>basada en los documentos]
+        F -->|No| H[4. IA indica que no<br/>tiene esa información]
+        G --> I[5. Asesor recibe<br/>respuesta y la fuente]
+        H --> I
+    end
+
+    C ~~~ D
+```
+
+**Fácil de mantener:** Cuando cambien tarifas, productos o condiciones, se sube el documento actualizado al gestor documental. El sistema lo procesa y el chat empieza a usar la nueva información de inmediato.
+
+---
+
 *Documento en construcción. Secciones se agregarán progresivamente.*

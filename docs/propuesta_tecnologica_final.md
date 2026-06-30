@@ -173,6 +173,29 @@ Cumplimos la ley así:
 | **Datos mínimos** | No almacenamos datos personales. Los chats de monitoreo se guardan sin información que identifique al cliente |
 | **Datos protegidos** | La información viaja cifrada (TLS 1.3). Los datos personales se eliminan automáticamente antes de llegar a la IA o guardarse |
 
+---
+
+## 2.5 Matriz de Amenazas y Mitigaciones
+
+| Amenaza | ¿Qué pasaría? | Cómo lo evitamos |
+|-|-|-|
+| **Interceptación de datos** | Alguien intercepta la comunicación entre el asesor y el sistema | Todo viaja cifrado con TLS 1.3. Un atacante solo ve datos cifrados |
+| **Fuga de datos personales** | La IA recibe nombres, documentos o teléfonos de clientes y podrían filtrarse | Presidio reemplaza automáticamente cualquier dato personal con tokens anónimos antes de llegar a la IA |
+| **Robo de sesión** | Alguien roba el token de acceso y se hace pasar por un asesor | Los tokens expiran cada 15 minutos y se renuevan automáticamente. |
+| **Uso malicioso de la API** | Un atacante usa el sistema para consultar información sin límite | Límite de consultas por asesor. Intentos sospechosos se bloquean automáticamente |
+| **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas |
+| **Suplantación entre servicios** | Un servicio falso se hace pasar por parte del sistema | Los microservicios se autentican entre sí con certificados. No se aceptan conexiones no autorizadas |
+
+## 2.6 Mitigación de Alucinaciones
+
+Una respuesta errónea sobre una edad de cobertura o un precio puede generar una reclamación. Por eso implementamos varias capas para evitar que la IA invente información:
+
+| Capa | Cómo funciona | Por qué importa |
+|-|-|-|
+| **Reglas fijas de comportamiento** | La IA tiene instrucciones explícitas: solo responder con información de los documentos. Si no encuentra la respuesta, dice "No tengo esa información" | Nunca inventa precios, edades ni coberturas |
+| **Filtro de información no verificada** | El sistema revisa que la respuesta solo contenga datos que están en los documentos cargados. Si detecta información numérica (edades, precios) que no está en los documentos, fuerza una advertencia al asesor | Evita que el asesor comparta información no respaldada |
+| **Umbral de confianza** | Si un documento no se parece lo suficiente a lo que preguntó el asesor, se descarta automáticamente. Si no queda ningún documento útil, la IA responde que no tiene información | El asesor solo recibe respuestas basadas en documentos realmente relevantes |
+| **Bloqueo por falta de contexto** | Si el sistema no logra armar un contexto sólido con al menos 2 fragmentos de documentos, no se consulta a la IA. Devuelve directamente un mensaje de "No tengo información suficiente" | Ahorra costos y evita respuestas sin fundamento |
 
 ---
 

@@ -4,8 +4,8 @@
 
 1. [Stack Tecnológico](#1-stack-tecnológico)
 2. [Arquitectura del Sistema](#2-arquitectura-del-sistema)
-3. [Stack Tecnológico Detallado](#3-stack-tecnológico-detallado)
-4. [Comparativa Cloud Provider](#4-comparativa-cloud-provider)
+3. [Costos de Infraestructura](#3-costos-de-infraestructura)
+4. [Stack Tecnológico Detallado](#4-stack-tecnológico-detallado)
 5. [Seguridad](#5-seguridad)
 6. [Plan de Implementación](#6-plan-de-implementación)
 7. [Estimación de Costos](#7-estimación-de-costos)
@@ -29,16 +29,6 @@
 | **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) para llaves de cifrado | Todos los datos viajan y se almacenan cifrados. |
 | **Monitoreo** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) - panel de control en tiempo real | Monitoreo en tiempo real. |
 | **Actualizaciones automáticas** | [GitHub Actions](https://docs.github.com/en/actions) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) - despliegue continuo | Cada mejora o corrección se publica en minutos sin intervencion manual. |
-
-### 1.1 Costo mensual de infraestructura AWS
-
-TRM de referencia: **$1 USD = $3,450 COP**.
-
-| Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
-|-------|-----------------|------------------|----------|-------------|
-| **MVP / Desarrollo** | ~$150-170/mes | ~$521.000-586.000 | < 10 | 1-2 microservicios, instancias pequeñas + QA |
-| **Producción (100 ases)** | ~$625-750/mes | ~$2.150.000-2.580.000 | ~100 | 4-5 servicios, HA parcial |
-| **Escalado (500+ ases)** | ~$1.440-1.560/mes | ~$4.955.000-5.382.000 | 500+ | HA completa, múltiples AZ |
 
 ---
 
@@ -199,4 +189,75 @@ Una respuesta errónea sobre una edad de cobertura o un precio puede generar una
 
 ---
 
-*Documento en construcción. Secciones se agregarán progresivamente.*
+## 3. Costos de Infraestructura
+
+TRM de referencia: **$1 USD = $3,450 COP**.
+
+**Precio del modelo de IA (Claude Sonnet):**
+- Entrada (texto que recibe): ~$10.350 COP por millón de tokens (~3.450 palabras)
+- Salida (texto que genera): ~$51.750 COP por millón de tokens (~3.450 palabras)
+
+**Ejemplo de una consulta real:**
+
+> Asesor: *"¿Cuál es el precio del Plan Familiar Premium para una pareja de 35 años?"*
+>
+> El sistema busca en los documentos, encuentra las tarifas vigentes y se las pasa como contexto a la IA. En total, la IA recibe ~2.300 palabras (la pregunta + el contexto del documento) y genera una respuesta de ~200 palabras.
+>
+> **Costo de esa consulta:** ~$35 COP
+
+### 3.1 Desarrollo
+
+| Servicio | Costo/mes (COP) |
+|----------|-----------------|
+| Login y control de acceso | ~$0 |
+| Servidores en la nube (3 servicios + balanceador) | ~$196.000 |
+| Base de datos | ~$58.000 |
+| Inteligencia artificial (~1.000 consultas) | ~$35.000 |
+| Almacenamiento y entrega de contenido | ~$3.000 |
+| Monitoreo y registros | ~$26.000 |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$147.000 |
+| **Total** | **~$465.000/mes** |
+
+### 3.2 Piloto (5-10 asesores)
+
+Misma arquitectura que desarrollo. La BD se apaga tras 1 hora sin actividad (no se apaga durante el día porque los asesores hacen consultas con frecuencia).
+
+| Servicio | Costo/mes (COP) |
+|----------|-----------------|
+| Login y control de acceso | ~$0 |
+| Servidores en la nube (3 servicios + balanceador) | ~$196.000 |
+| Base de datos | ~$58.000 |
+| Inteligencia artificial (~5.000 consultas) | ~$175.000 |
+| Almacenamiento y entrega de contenido | ~$3.000 |
+| Monitoreo y registros | ~$26.000 |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$147.000 |
+| **Total** | **~$605.000/mes** |
+
+### 3.3 Producción (100 asesores)
+
+Cada asesor hace ~30 consultas/día, ~600/mes. Total: ~60.000 consultas/mes.
+
+| Servicio | Costo/mes (COP) |
+|----------|-----------------|
+| Login y control de acceso | ~$0 |
+| Servidores en la nube (3 servicios con réplicas + balanceador) | ~$476.000 |
+| Base de datos | ~$245.000 |
+| Inteligencia artificial (~60.000 consultas) | ~$2.100.000 |
+| Almacenamiento y entrega de contenido | ~$28.000 |
+| Monitoreo y registros | ~$104.000 |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
+| **Total** | **~$3.153.000/mes** |
+
+### 3.4 Crecimiento (200-500+ asesores)
+
+| Servicio | Costo/mes (COP) |
+|----------|-----------------|
+| Login y control de acceso | ~$10.000 |
+| Servidores en la nube (4 servicios con réplicas + balanceadores) | ~$1.045.000 |
+| Base de datos | ~$486.000 |
+| Inteligencia artificial (~300.000 consultas) | ~$10.500.000 |
+| Almacenamiento y entrega de contenido | ~$62.000 |
+| Monitoreo y registros | ~$242.000 |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$350.000 |
+| **Total** | **~$12.695.000/mes** |
+

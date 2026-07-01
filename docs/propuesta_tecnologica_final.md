@@ -1,5 +1,5 @@
 # PROPUESTA TECNOLÓGICA
-## Sistema de Asesor Comercial Aumentado con IA
+## Sistema de asesor comercial aumentado con IA
 ## Índice
 
 1. [Stack Tecnológico](#1-stack-tecnológico)
@@ -14,7 +14,7 @@
 
 ---
 
-## 1. Stack Tecnológico
+## 1. Stack tecnológico
 
 | Capa | Tecnología | Por qué es importante |
 |------|-----------|----------------------|
@@ -30,7 +30,7 @@
 | **Monitoreo** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) - panel de control en tiempo real | Monitoreo en tiempo real. |
 | **Actualizaciones automáticas** | [GitHub Actions](https://docs.github.com/en/actions) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) - despliegue continuo | Cada mejora o corrección se publica en minutos sin intervencion manual. |
 
-### 1.1 Costo Mensual de Infraestructura AWS
+### 1.1 Costo mensual de infraestructura AWS
 
 TRM de referencia: **$1 USD = $3,450 COP**.
 
@@ -42,9 +42,9 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 
 ---
 
-## 2. Arquitectura del Sistema
+## 2. Arquitectura del sistema
 
-### 2.1 Modalidades de Despliegue
+### 2.1 Modalidades de despliegue
 
 Existen **dos formas** de implementarlo:
 
@@ -58,7 +58,7 @@ Existen **dos formas** de implementarlo:
 
 > **¿Cuál elegir?** Si ya se tiene una página web y sistema de login, la Opción 1 es más rápida y económica. Si no se tiene o se quiere simplificar, la Opción 2 incluye todo listo.
 
-**Opción 1 — Widget solo (Capillas ya tiene login):**
+**Opción 1 — Widget solo:**
 
 ```mermaid
 graph TB
@@ -87,7 +87,7 @@ graph TB
     RAG -->|Genera respuesta con IA| BEDROCK
 ```
 
-**Opción 2 — App completa (Nosotros manejamos todo):**
+**Opción 2 — App completa:**
 
 ```mermaid
 graph TB
@@ -118,7 +118,7 @@ graph TB
 
 ---
 
-## 2.2 Flujo del Sistema
+## 2.2 Flujo del sistema
 
 ```mermaid
 flowchart TB
@@ -141,7 +141,7 @@ flowchart TB
 
 **Fácil de mantener:** Cuando cambien tarifas, productos o condiciones, se sube el documento actualizado al gestor documental. El sistema lo procesa y el chat empieza a usar la nueva información de inmediato.
 
-## 2.3 Flujo de Seguridad
+## 2.3 Flujo de seguridad
 
 ```mermaid
 flowchart TB
@@ -160,7 +160,7 @@ flowchart TB
     B --> C
 ```
 
-## 2.4 Privacidad de Datos — Ley 1581 de 2012
+## 2.4 Privacidad de datos - Ley 1581 de 2012
 
 No almacenamos datos personales de clientes. El único registro que se guarda son los chats (ya anonimizados) para monitoreo de calidad, por un tiempo definido por el negocio. Antes de llegar a la IA, cualquier información personal (nombres, documentos, teléfonos, direcciones, etc.) se reemplaza con datos anónimos usando un filtro automático. La IA nunca recibe información personal.
 
@@ -175,7 +175,7 @@ Cumplimos la ley así:
 
 ---
 
-## 2.5 Matriz de Amenazas y Mitigaciones
+## 2.5 Matriz de amenazas y mitigaciones
 
 | Amenaza | ¿Qué pasaría? | Cómo lo evitamos |
 |-|-|-|
@@ -186,7 +186,7 @@ Cumplimos la ley así:
 | **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas |
 | **Suplantación entre servicios** | Un servicio falso se hace pasar por parte del sistema | Los microservicios se autentican entre sí con certificados. No se aceptan conexiones no autorizadas |
 
-## 2.6 Mitigación de Alucinaciones
+## 2.6 Mitigación de alucinaciones
 
 Una respuesta errónea sobre una edad de cobertura o un precio puede generar una reclamación. Por eso implementamos varias capas para evitar que la IA invente información:
 

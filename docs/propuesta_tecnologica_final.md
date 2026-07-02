@@ -236,63 +236,65 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 
 ### 3.1 Desarrollo
 
-| Servicio | Costo/mes (COP) |
-|----------|-----------------|
+| Servicio | Costo/mes (COP / USD) |
+|----------|----------------------|
 | Login y control de acceso | ~$0 |
-| Servidores en la nube (3 servicios + balanceador) | ~$196.000 |
-| Base de datos | ~$58.000 |
-| Inteligencia artificial (~1.000 conversaciones) | ~$65.000 |
-| Almacenamiento y entrega de contenido | ~$3.000 |
-| Monitoreo y registros | ~$26.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
-| **Total** | **~$548.000/mes** |
+| Servidores en la nube (3 servicios + balanceador) | ~$196.000 COP (~$57 USD) |
+| Base de datos (RDS db.t4g.micro, se apaga fuera de horario) | ~$20.000 COP (~$6 USD) |
+| Inteligencia artificial (~1.000 conversaciones) | ~$65.000 COP (~$19 USD) |
+| Almacenamiento y entrega de contenido | ~$3.000 COP (~$1 USD) |
+| Monitoreo y registros | ~$26.000 COP (~$8 USD) |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 COP (~$58 USD) |
+| **Total** | **~$510.000 COP (~$148 USD)** |
 
 ### 3.2 Piloto (5-10 asesores)
 
 Misma arquitectura que desarrollo. La BD se apaga tras 1 hora sin actividad (no se apaga durante el día porque los asesores hacen consultas con frecuencia).
 
-| Servicio | Costo/mes (COP) |
-|----------|-----------------|
+| Servicio | Costo/mes (COP / USD) |
+|----------|----------------------|
 | Login y control de acceso | ~$0 |
-| Servidores en la nube (3 servicios + balanceador) | ~$196.000 |
-| Base de datos | ~$58.000 |
-| Inteligencia artificial (~3.000 conversaciones) | ~$195.000 |
-| Almacenamiento y entrega de contenido | ~$3.000 |
-| Monitoreo y registros | ~$26.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
-| **Total** | **~$678.000/mes** |
+| Servidores en la nube (3 servicios + balanceador) | ~$196.000 COP (~$57 USD) |
+| Base de datos (Aurora Serverless v2) | ~$58.000 COP (~$17 USD) |
+| Inteligencia artificial (~3.000 conversaciones) | ~$195.000 COP (~$57 USD) |
+| Almacenamiento y entrega de contenido | ~$3.000 COP (~$1 USD) |
+| Monitoreo y registros | ~$26.000 COP (~$8 USD) |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 COP (~$58 USD) |
+| **Total** | **~$678.000 COP (~$197 USD)** |
 
 ### 3.3 Producción (100 asesores)
 
 Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesores): ~40.000 conversaciones/mes.
 
-| Servicio | Costo/mes (COP) |
-|----------|-----------------|
+| Servicio | Costo/mes (COP / USD) |
+|----------|----------------------|
 | Login y control de acceso | ~$0 |
-| Servidores en la nube (3 servicios con réplicas + balanceador) | ~$476.000 |
-| Base de datos | ~$245.000 |
-| Inteligencia artificial (~40.000 conversaciones) | ~$2.600.000 |
-| Almacenamiento y entrega de contenido | ~$28.000 |
-| Monitoreo y registros | ~$104.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$250.000 |
-| **Total** | **~$3.703.000/mes** |
+| Servidores en la nube (3 servicios con réplicas + balanceador) | ~$476.000 COP (~$138 USD) |
+| Base de datos (Aurora Serverless v2) | ~$245.000 COP (~$71 USD) |
+| Inteligencia artificial (~40.000 conversaciones) | ~$2.600.000 COP (~$754 USD) |
+| Almacenamiento y entrega de contenido | ~$28.000 COP (~$8 USD) |
+| Monitoreo y registros | ~$104.000 COP (~$30 USD) |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$250.000 COP (~$72 USD) |
+| **Total** | **~$3.703.000 COP (~$1.073 USD)** |
 
 ### 3.4 Crecimiento (200-500+ asesores)
 
-| Servicio | Costo/mes (COP) |
-|----------|-----------------|
-| Login y control de acceso | ~$10.000 |
-| Servidores en la nube (4 servicios con réplicas + balanceadores) | ~$1.045.000 |
-| Base de datos | ~$486.000 |
-| Inteligencia artificial (~200.000 conversaciones) | ~$13.000.000 |
-| Almacenamiento y entrega de contenido | ~$62.000 |
-| Monitoreo y registros | ~$242.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$400.000 |
-| **Total** | **~$15.245.000/mes** |
+| Servicio | Costo/mes (COP / USD) |
+|----------|----------------------|
+| Login y control de acceso | ~$10.000 COP (~$3 USD) |
+| Servidores en la nube (4 servicios con réplicas + balanceadores) | ~$1.045.000 COP (~$303 USD) |
+| Base de datos (Aurora Serverless v2) | ~$486.000 COP (~$141 USD) |
+| Inteligencia artificial (~200.000 conversaciones) | ~$13.000.000 COP (~$3.768 USD) |
+| Almacenamiento y entrega de contenido | ~$62.000 COP (~$18 USD) |
+| Monitoreo y registros | ~$242.000 COP (~$70 USD) |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$400.000 COP (~$116 USD) |
+| **Total** | **~$15.245.000 COP (~$4.419 USD)** |
 
 ---
 
 ## 4. Planes y Precios
+
+Los precios están calculados para un uso promedio de **20 conversaciones al día por asesor (~400/mes)**. Si el uso real es menor, el costo baja; si es mayor, sube en proporción al excedente.
 
 ### 4.1 Construcción
 
@@ -309,7 +311,7 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Precio mensual | $5.500.000 COP |
 | Incluye | Soporte + toda la infraestructura en la nube |
 | Límite incluido | Hasta 40.000 conversaciones/mes (~20/día × 100 asesores) |
-| Si excede el límite | $85 COP por conversación adicional |
+| Si excede el límite | $85 COP (~$0,025 USD) por conversación adicional |
 
 ### 4.3 Plan Crecimiento (hasta 500+ asesores)
 
@@ -318,7 +320,7 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Precio mensual | $20.000.000 COP |
 | Incluye | Soporte + toda la infraestructura en la nube |
 | Límite incluido | Hasta 200.000 conversaciones/mes (~20/día × 500 asesores) |
-| Si excede el límite | $85 COP por conversación adicional |
+| Si excede el límite | $85 COP (~$0,025 USD) por conversación adicional |
 
 ---
 

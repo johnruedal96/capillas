@@ -267,3 +267,33 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$350.000 |
 | **Total** | **~$15.195.000/mes** |
 
+---
+
+## 4. Planes y Precios
+
+### 4.1 Construcción
+
+| Concepto | Valor |
+|----------|-------|
+| Precio mensual | $10.000.000 COP |
+| Incluye | Desarrollo del sistema + toda la infraestructura en la nube |
+| Uso | construcción y piloto con 5-10 asesores |
+
+### 4.2 Plan Producción (hasta 100 asesores)
+
+| Concepto | Valor |
+|----------|-------|
+| Precio mensual | $5.500.000 COP |
+| Incluye | Soporte + toda la infraestructura en la nube |
+| Límite incluido | Hasta 40.000 conversaciones/mes (~20/día × 100 asesores) |
+| Si excede el límite | $65 COP por conversación adicional |
+
+### 4.3 Plan Crecimiento (hasta 500+ asesores)
+
+| Concepto | Valor |
+|----------|-------|
+| Precio mensual | $18.500.000 COP |
+| Incluye | Soporte + toda la infraestructura en la nube |
+| Límite incluido | Hasta 200.000 conversaciones/mes (~20/día × 500 asesores) |
+| Si excede el límite | $65 COP por conversación adicional |
+

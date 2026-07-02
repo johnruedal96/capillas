@@ -128,7 +128,7 @@ flowchart TB
         D[1. Asesor hace una<br/>pregunta en el chat] --> E[2. Sistema busca en<br/>los documentos]
         E --> F{3. Encuentra<br/>información útil?}
         F -->|Sí| G[4. IA genera respuesta<br/>basada en los documentos]
-        F -->|No| H[4. IA indica que no<br/>tiene esa información]
+        F -->|No| H[4. Sistema responde<br/>No tengo información]
         G --> I[5. Asesor recibe<br/>respuesta y la fuente]
         H --> I
     end
@@ -159,9 +159,11 @@ flowchart TB
 
 ### 2.4 Privacidad de datos personales
 
-El sistema está diseñado para no almacenar datos personales de clientes. Nuestras bases de datos solo contienen información de conocimiento (tarifas, planes, procesos). Si un asesor menciona un nombre, documento o teléfono en el chat, un filtro automático lo reemplaza con datos anónimos de forma irreversible antes de que llegue al modelo de IA o se guarde en los registros. La IA nunca recibe información personal.
+El sistema está diseñado para no almacenar datos personales de clientes. Nuestras bases de datos solo contienen información de conocimiento (tarifas, planes, procesos). Si un asesor menciona un nombre, documento o teléfono en el chat, un filtro automático lo reemplaza con datos anónimos de forma irreversible antes de que llegue al modelo de IA o se guarde en los registros. El sistema está diseñado para que la IA no reciba información personal.
 
 Los chats anonimizados se guardan por un tiempo definido por el negocio para monitoreo de calidad. Como la anonimización es irreversible, no contienen datos personales ni es posible reconstruirlos.
+
+Los documentos que se suben al sistema (tarifas, planes, coberturas) no deberían contener datos personales de clientes. Si por algún motivo necesitaran almacenar documentación con información sensible, lo evaluamos para implementar las medidas adicionales que apliquen.
 
 ---
 
@@ -184,7 +186,7 @@ Una respuesta errónea sobre una edad de cobertura o un precio puede generar una
 |-|-|-|
 | **Reglas fijas de comportamiento** | La IA tiene instrucciones explícitas: solo responder con información de los documentos. Si no encuentra la respuesta, dice "No tengo esa información" | Nunca inventa precios, edades ni coberturas |
 | **Filtro de información no verificada** | El sistema revisa que la respuesta solo contenga datos que están en los documentos cargados. Si detecta información numérica (edades, precios) que no está en los documentos, fuerza una advertencia al asesor | Evita que el asesor comparta información no respaldada |
-| **Umbral de confianza** | Si un documento no se parece lo suficiente a lo que preguntó el asesor, se descarta automáticamente. Si no queda ningún documento útil, la IA responde que no tiene información | El asesor solo recibe respuestas basadas en documentos realmente relevantes |
+| **Umbral de confianza** | Si un documento no se parece lo suficiente a lo que preguntó el asesor, se descarta automáticamente. Si no queda ningún documento útil, el sistema responde que no tiene información | El asesor solo recibe respuestas basadas en documentos realmente relevantes |
 | **Bloqueo por falta de contexto** | Si el sistema no logra armar un contexto sólido con al menos 2 fragmentos de documentos, no se consulta a la IA. Devuelve directamente un mensaje de "No tengo información suficiente" | Ahorra costos y evita respuestas sin fundamento |
 
 ### 2.7 Disponibilidad y continuidad

@@ -9,7 +9,7 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 2. [Arquitectura del Sistema](#2-arquitectura-del-sistema)
 3. [Costos de Infraestructura](#3-costos-de-infraestructura)
 4. [Planes y Precios](#4-planes-y-precios)
-5. [Qué necesita Capillas](#5-qué-necesita-capillas)
+5. [Preguntas Frecuentes](#5-preguntas-frecuentes)
 
 ---
 
@@ -27,7 +27,7 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 | **Infraestructura** | [AWS](https://aws.amazon.com/) - la nube más usada del mundo, sin servidores que administrar | No hay servidores físicos que mantener. |
 | **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) para llaves de cifrado | Todos los datos viajan y se almacenan cifrados. |
 | **Monitoreo** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) - panel de control en tiempo real | Monitoreo en tiempo real. |
-| **Actualizaciones automáticas** | [GitHub Actions](https://docs.github.com/en/actions) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) - despliegue continuo | Cada mejora o corrección se publica en minutos sin intervencion manual. |
+| **Actualizaciones automáticas** | [GitHub Actions](https://docs.github.com/en/actions) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) - despliegue continuo | Cada mejora o corrección se publica en minutos sin intervención manual. |
 
 ---
 
@@ -107,7 +107,15 @@ graph TB
 
 ---
 
-## 2.2 Flujo del sistema
+### Así funciona en el día a día
+
+**Doña Luz** llega a una sede de Capillas porque falleció su esposo. Quiere saber si el plan que contrataron cubre cremación y cuánto cuesta actualizarlo.
+
+**María, la asesora**, abre el chat en su computador y escribe: *«¿El plan comprado en 2020 cubre cremación?»*. En segundos, el sistema responde: *«Sí, el plan incluye cremación. La actualización al plan vigente tiene un valor de $X.»* María lee la respuesta a Doña Luz. Todo tomó 10 segundos, sin carpetas ni supervisores.
+
+**Cuando cambian las tarifas:** El administrador sube el nuevo PDF de precios al gestor documental. El sistema lo procesa automáticamente. Al minuto siguiente, todos los asesores responden con los nuevos precios.
+
+### 2.2 Flujo del sistema
 
 ```mermaid
 flowchart TB
@@ -130,7 +138,7 @@ flowchart TB
 
 **Fácil de mantener:** Cuando cambien tarifas, productos o condiciones, se sube el documento actualizado al gestor documental. El sistema lo procesa y el chat empieza a usar la nueva información de inmediato.
 
-## 2.3 Flujo de seguridad
+### 2.3 Flujo de seguridad
 
 ```mermaid
 flowchart TB
@@ -149,7 +157,7 @@ flowchart TB
     B --> C
 ```
 
-## 2.4 Privacidad de datos - Ley 1581 de 2012
+### 2.4 Privacidad de datos - Ley 1581 de 2012
 
 No almacenamos datos personales de clientes. El único registro que se guarda son los chats (ya anonimizados) para monitoreo de calidad, por un tiempo definido por el negocio. Antes de llegar a la IA, cualquier información personal (nombres, documentos, teléfonos, direcciones, etc.) se reemplaza con datos anónimos usando un filtro automático. La IA nunca recibe información personal.
 
@@ -164,7 +172,7 @@ Cumplimos la ley así:
 
 ---
 
-## 2.5 Matriz de amenazas y mitigaciones
+### 2.5 Matriz de amenazas y mitigaciones
 
 | Amenaza | ¿Qué pasaría? | Cómo lo evitamos |
 |-|-|-|
@@ -175,7 +183,7 @@ Cumplimos la ley así:
 | **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas |
 | **Suplantación entre servicios** | Un servicio falso se hace pasar por parte del sistema | Los microservicios se autentican entre sí con certificados. No se aceptan conexiones no autorizadas |
 
-## 2.6 Mitigación de alucinaciones
+### 2.6 Mitigación de alucinaciones
 
 Una respuesta errónea sobre una edad de cobertura o un precio puede generar una reclamación. Por eso implementamos varias capas para evitar que la IA invente información:
 
@@ -185,6 +193,27 @@ Una respuesta errónea sobre una edad de cobertura o un precio puede generar una
 | **Filtro de información no verificada** | El sistema revisa que la respuesta solo contenga datos que están en los documentos cargados. Si detecta información numérica (edades, precios) que no está en los documentos, fuerza una advertencia al asesor | Evita que el asesor comparta información no respaldada |
 | **Umbral de confianza** | Si un documento no se parece lo suficiente a lo que preguntó el asesor, se descarta automáticamente. Si no queda ningún documento útil, la IA responde que no tiene información | El asesor solo recibe respuestas basadas en documentos realmente relevantes |
 | **Bloqueo por falta de contexto** | Si el sistema no logra armar un contexto sólido con al menos 2 fragmentos de documentos, no se consulta a la IA. Devuelve directamente un mensaje de "No tengo información suficiente" | Ahorra costos y evita respuestas sin fundamento |
+
+### 2.7 Disponibilidad y continuidad
+
+| Aspecto | Cómo lo manejamos |
+|---------|-------------------|
+| **Disponibilidad esperada** | 99.5% del tiempo (~3.5 horas de interrupción al mes como máximo) |
+| **Fallos de servidores** | Los servicios se ejecutan en múltiples zonas. Si una zona falla, el sistema sigue funcionando desde otra |
+| **Pérdida de base de datos** | La base de datos se respalda automáticamente todos los días. Podemos restaurar a cualquier punto en los últimos 30 días |
+| **Fallo de la IA** | Si la IA no responde, el sistema muestra un mensaje claro al asesor. No se pierde información ni consultas |
+| **Corte de internet del asesor** | El sistema funciona solo con conexión. Si no hay internet, el asesor vuelve a su método actual. |
+
+### Medición de calidad
+
+El sistema mide automáticamente la calidad de las respuestas:
+
+| Métrica | Cómo se mide |
+|---------|-------------|
+| **Satisfacción del asesor** | El asesor puede calificar cada respuesta |
+| **Tasa de "No tengo información"** | Cuántas consultas quedan sin responder. Si es muy alta, los documentos están incompletos |
+| **Tiempo de respuesta** | El sistema registra cuánto tarda en responder cada consulta |
+| **Alertas automáticas** | Si la calidad baja, recibimos una alerta para revisar y corregir |
 
 ---
 
@@ -285,7 +314,7 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Precio mensual | $5.500.000 COP |
 | Incluye | Soporte + toda la infraestructura en la nube |
 | Límite incluido | Hasta 40.000 conversaciones/mes (~20/día × 100 asesores) |
-| Si excede el límite | $65 COP por conversación adicional |
+| Si excede el límite | $85 COP por conversación adicional |
 
 ### 4.3 Plan Crecimiento (hasta 500+ asesores)
 
@@ -294,5 +323,30 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Precio mensual | $18.500.000 COP |
 | Incluye | Soporte + toda la infraestructura en la nube |
 | Límite incluido | Hasta 200.000 conversaciones/mes (~20/día × 500 asesores) |
-| Si excede el límite | $65 COP por conversación adicional |
+| Si excede el límite | $85 COP por conversación adicional |
+
+---
+
+## 5. Preguntas Frecuentes
+
+**¿La IA se puede equivocar y dar una respuesta falsa a un cliente?**
+El sistema solo responde con información que está en los documentos de Capillas. Si no encuentra la respuesta en los documentos, dice "No tengo esa información" — no inventa. Cada respuesta muestra la fuente exacta para que el asesor verifique antes de responder.
+
+**¿Esto va a reemplazar a los asesores?**
+No. Es una herramienta de consulta. El asesor sigue atendiendo al cliente, resolviendo objeciones y cerrando la venta. La IA solo le da la información más rápido para que pueda atender mejor.
+
+**¿Qué pasa si falla el internet en la sede?**
+El sistema funciona con conexión. Si no hay internet, el asesor vuelve a su método actual. No se pierde información ni consultas.
+
+**¿Qué pasa si ustedes dejan de operar o terminamos el contrato?**
+Los documentos y datos son de Capillas. Si deciden terminar, entregamos toda la información en formato estándar con 60 días para exportar sin costo.
+
+**¿Necesitamos un técnico para operar esto?**
+No. La operación del día a día la hace cualquier persona administrativa: subir documentos y ver reportes. Nosotros manejamos la parte técnica.
+
+**¿Qué necesitamos de nuestra parte para arrancar?**
+- Documentos comerciales (tarifas, planes, coberturas) en Word o PDF
+- Una persona de contacto para la implementación
+- Acceso a la página web (Opción 1) o logo y colores (Opción 2)
+- 5-10 asesores para el piloto
 

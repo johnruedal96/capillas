@@ -22,7 +22,7 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 | **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) - sistema de login gestionado por AWS | Cada asesor tiene su propio usuario y contraseña. Se puede activar doble factor de autenticación. |
 | **Backend (lógica del negocio)** | [FastAPI](https://fastapi.tiangolo.com/) (Python) + [gRPC](https://grpc.io/docs/) - tecnología moderna de APIs probada a gran escala | Procesa cada consulta en milisegundos. Soporta cientos de asesores simultáneos. |
 | **Buscador inteligente (RAG)** | [LlamaIndex](https://docs.llamaindex.ai/) - motor de búsqueda aumentada con IA, el estándar de la industria para sistemas de preguntas y respuestas sobre documentos propios | Busca en los documentos para responder con información real. Cada respuesta viene con la fuente de dónde se obtuvo. |
-| **Base de datos de documentos** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) - base de datos que entiende texto | Almacena y organiza los documentos. Cuando nadie la usa, se apaga para ahorrar costos. |
+| **Base de datos de documentos** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) - base de datos que entiende texto | Almacena y organiza los documentos. Reduce su capacidad al mínimo automático cuando nadie la usa para minimizar costos, escalando al instante cuando los asesores se conectan. |
 | **Generación de respuestas** | [Claude Sonnet](https://aws.amazon.com/bedrock/claude/) - modelo de inteligencia artificial de última generación | Genera respuestas detalladas basadas en los documentos cargados |
 | **Infraestructura** | [AWS](https://aws.amazon.com/) - la nube más usada del mundo, sin servidores que administrar | No hay servidores físicos que mantener. |
 | **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) para la información en tránsito | La información viaja cifrada. Se almacenan los documentos y sus índices, y los chats se guardan anonimizados por un tiempo definido. |
@@ -175,8 +175,9 @@ Los documentos que se suben al sistema (tarifas, planes, coberturas) no debería
 | **Fuga de datos personales** | La IA recibe nombres, documentos o teléfonos de clientes y podrían filtrarse | Un filtro automático reemplaza cualquier dato personal con información anónima antes de llegar a la IA |
 | **Robo de sesión** | Alguien roba el token de acceso y se hace pasar por un asesor | Los tokens expiran cada 15 minutos y se renuevan automáticamente. |
 | **Uso malicioso de la API** | Un atacante usa el sistema para consultar información sin límite | Límite de consultas por asesor. Intentos sospechosos se bloquean automáticamente |
-| **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas |
+| **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas. Además, AWS Bedrock Guardrails bloquea activamente intentos de ingeniería de prompts o inyección |
 | **Suplantación entre servicios** | Un servicio falso se hace pasar por parte del sistema | Los microservicios se autentican entre sí con certificados. No se aceptan conexiones no autorizadas |
+| **Abuso de consumo** | Un asesor o script automatizado genera consultas sin control, disparando costos de IA antes de facturar el excedente | Límite de consultas por minuto por asesor y un techo técnico mensual configurable según el acuerdo comercial |
 
 ### 2.7 Mitigación de alucinaciones
 
@@ -216,7 +217,7 @@ El sistema mide automáticamente la calidad de las respuestas:
 
 TRM de referencia: **$1 USD = $3,450 COP**.
 
-**Precio del modelo de IA (Claude Sonnet):**
+**Precio del modelo de IA (Claude 4.6 Sonnet):**
 - Entrada (texto que recibe): ~$10.350 COP por millón de tokens
 - Salida (texto que genera): ~$51.750 COP por millón de tokens
 

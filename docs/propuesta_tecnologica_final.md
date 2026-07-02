@@ -107,7 +107,7 @@ graph TB
 
 ---
 
-### Así funciona en el día a día
+### 2.2 Así funciona en el día a día
 
 **Doña Luz** llega a una sede de Capillas porque falleció su esposo. Quiere saber si el plan que contrataron cubre cremación y cuánto cuesta actualizarlo.
 
@@ -115,7 +115,7 @@ graph TB
 
 **Cuando cambian las tarifas:** El administrador sube el nuevo PDF de precios al gestor documental. El sistema lo procesa automáticamente. Al minuto siguiente, todos los asesores responden con los nuevos precios.
 
-### 2.2 Flujo del sistema
+### 2.3 Flujo del sistema
 
 ```mermaid
 flowchart TB
@@ -128,7 +128,7 @@ flowchart TB
         D[1. Asesor hace una<br/>pregunta en el chat] --> E[2. Sistema busca en<br/>los documentos]
         E --> F{3. Encuentra<br/>información útil?}
         F -->|Sí| G[4. IA genera respuesta<br/>basada en los documentos]
-        F -->|No| H[4. Sistema responde<br/>No tengo información]
+        F -->|No| H[4. Sistema responde<br/>'No tengo información']
         G --> I[5. Asesor recibe<br/>respuesta y la fuente]
         H --> I
     end
@@ -138,7 +138,7 @@ flowchart TB
 
 **Fácil de mantener:** Cuando cambien tarifas, productos o condiciones, se sube el documento actualizado al gestor documental. El sistema lo procesa y el chat empieza a usar la nueva información de inmediato.
 
-### 2.3 Flujo de seguridad
+### 2.4 Flujo de seguridad
 
 ```mermaid
 flowchart TB
@@ -157,7 +157,7 @@ flowchart TB
     B --> C
 ```
 
-### 2.4 Privacidad de datos personales
+### 2.5 Privacidad de datos personales
 
 El sistema está diseñado para no almacenar datos personales de clientes. Nuestras bases de datos solo contienen información de conocimiento (tarifas, planes, procesos). Si un asesor menciona un nombre, documento o teléfono en el chat, un filtro automático lo reemplaza con datos anónimos de forma irreversible antes de que llegue al modelo de IA o se guarde en los registros. El sistema está diseñado para que la IA no reciba información personal.
 
@@ -167,7 +167,7 @@ Los documentos que se suben al sistema (tarifas, planes, coberturas) no debería
 
 ---
 
-### 2.5 Matriz de amenazas y mitigaciones
+### 2.6 Matriz de amenazas y mitigaciones
 
 | Amenaza | ¿Qué pasaría? | Cómo lo evitamos |
 |-|-|-|
@@ -178,7 +178,7 @@ Los documentos que se suben al sistema (tarifas, planes, coberturas) no debería
 | **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas |
 | **Suplantación entre servicios** | Un servicio falso se hace pasar por parte del sistema | Los microservicios se autentican entre sí con certificados. No se aceptan conexiones no autorizadas |
 
-### 2.6 Mitigación de alucinaciones
+### 2.7 Mitigación de alucinaciones
 
 Una respuesta errónea sobre una edad de cobertura o un precio puede generar una reclamación. Por eso implementamos varias capas para evitar que la IA invente información:
 
@@ -189,7 +189,7 @@ Una respuesta errónea sobre una edad de cobertura o un precio puede generar una
 | **Umbral de confianza** | Si un documento no se parece lo suficiente a lo que preguntó el asesor, se descarta automáticamente. Si no queda ningún documento útil, el sistema responde que no tiene información | El asesor solo recibe respuestas basadas en documentos realmente relevantes |
 | **Bloqueo por falta de contexto** | Si el sistema no logra armar un contexto sólido con al menos 2 fragmentos de documentos, no se consulta a la IA. Devuelve directamente un mensaje de "No tengo información suficiente" | Ahorra costos y evita respuestas sin fundamento |
 
-### 2.7 Disponibilidad y continuidad
+### 2.8 Disponibilidad y continuidad
 
 | Aspecto | Cómo lo manejamos |
 |---------|-------------------|
@@ -199,7 +199,7 @@ Una respuesta errónea sobre una edad de cobertura o un precio puede generar una
 | **Fallo de la IA** | Si la IA no responde, el sistema muestra un mensaje claro al asesor. No se pierde información ni consultas |
 | **Corte de internet del asesor** | El sistema funciona solo con conexión. Si no hay internet, el asesor vuelve a su método actual. |
 
-### Medición de calidad
+### 2.9 Medición de calidad
 
 El sistema mide automáticamente la calidad de las respuestas:
 
@@ -299,8 +299,8 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Concepto | Valor |
 |----------|-------|
 | Precio mensual | $10.000.000 COP |
-| Incluye | Desarrollo del sistema + toda la infraestructura en la nube |
-| Uso | construcción y piloto con 5-10 asesores |
+| Incluye | Desarrollo completo del sistema: chat de consulta, gestor para cargar documentos, panel de monitoreo, mecanismo de actualizaciones automáticas, infraestructura en la nube |
+| Uso | Construcción y piloto con 5-10 asesores |
 
 ### 4.2 Plan Producción (hasta 100 asesores)
 

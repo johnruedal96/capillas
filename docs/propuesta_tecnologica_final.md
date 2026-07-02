@@ -159,9 +159,9 @@ flowchart TB
 
 ### 2.4 Privacidad de datos personales
 
-El sistema está diseñado para no almacenar datos personales de clientes. Nuestras bases de datos solo contienen información de conocimiento (tarifas, planes, procesos, etc). Si un asesor menciona un nombre, documento o teléfono en el chat, un filtro automático lo reemplaza con datos anónimos antes de que llegue al modelo de IA o se guarde en los registros. La IA nunca recibe información personal.
+El sistema está diseñado para no almacenar datos personales de clientes. Nuestras bases de datos solo contienen información de conocimiento (tarifas, planes, procesos). Si un asesor menciona un nombre, documento o teléfono en el chat, un filtro automático lo reemplaza con datos anónimos de forma irreversible antes de que llegue al modelo de IA o se guarde en los registros. La IA nunca recibe información personal.
 
-Los chats anonimizados se guardan por un tiempo definido por el negocio para monitoreo de calidad. No se pueden reconstruir los datos originales a partir de los registros.
+Los chats anonimizados se guardan por un tiempo definido por el negocio para monitoreo de calidad. Como la anonimización es irreversible, no contienen datos personales ni es posible reconstruirlos.
 
 ---
 
@@ -170,7 +170,7 @@ Los chats anonimizados se guardan por un tiempo definido por el negocio para mon
 | Amenaza | ¿Qué pasaría? | Cómo lo evitamos |
 |-|-|-|
 | **Interceptación de datos** | Alguien intercepta la comunicación entre el asesor y el sistema | Todo viaja cifrado con TLS 1.3. Un atacante solo ve datos cifrados |
-| **Fuga de datos personales** | La IA recibe nombres, documentos o teléfonos de clientes y podrían filtrarse | Presidio reemplaza automáticamente cualquier dato personal con tokens anónimos antes de llegar a la IA |
+| **Fuga de datos personales** | La IA recibe nombres, documentos o teléfonos de clientes y podrían filtrarse | Un filtro automático reemplaza cualquier dato personal con información anónima antes de llegar a la IA |
 | **Robo de sesión** | Alguien roba el token de acceso y se hace pasar por un asesor | Los tokens expiran cada 15 minutos y se renuevan automáticamente. |
 | **Uso malicioso de la API** | Un atacante usa el sistema para consultar información sin límite | Límite de consultas por asesor. Intentos sospechosos se bloquean automáticamente |
 | **Manipulación de la IA** | Alguien engaña a la IA para que ignore las reglas | Las instrucciones de seguridad están separadas de la conversación. La IA no puede modificarlas |
@@ -215,8 +215,8 @@ El sistema mide automáticamente la calidad de las respuestas:
 TRM de referencia: **$1 USD = $3,450 COP**.
 
 **Precio del modelo de IA (Claude Sonnet):**
-- Entrada (texto que recibe): ~$10.350 COP por millón de tokens (~3.450 palabras)
-- Salida (texto que genera): ~$51.750 COP por millón de tokens (~3.450 palabras)
+- Entrada (texto que recibe): ~$10.350 COP por millón de tokens
+- Salida (texto que genera): ~$51.750 COP por millón de tokens
 
 **Ejemplo de una conversación típica (~2 preguntas):**
 

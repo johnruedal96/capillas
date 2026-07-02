@@ -197,13 +197,19 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 - Entrada (texto que recibe): ~$10.350 COP por millón de tokens (~3.450 palabras)
 - Salida (texto que genera): ~$51.750 COP por millón de tokens (~3.450 palabras)
 
-**Ejemplo de una consulta real:**
+**Ejemplo de una conversación típica (~2 preguntas):**
 
 > Asesor: *"¿Cuál es el precio del Plan Familiar Premium para una pareja de 35 años?"*
 >
-> El sistema busca en los documentos, encuentra las tarifas vigentes y se las pasa como contexto a la IA. En total, la IA recibe ~2.300 palabras (la pregunta + el contexto del documento) y genera una respuesta de ~200 palabras.
+> El sistema busca en los documentos, encuentra las tarifas vigentes y se las pasa como contexto a la IA. En total, la IA recibe ~2.050 palabras e instrucciones del sistema y genera una respuesta de ~200 palabras. **($32 COP)**
 >
-> **Costo de esa consulta:** ~$35 COP
+> Asesor: *"¿Y para una familia con dos hijos?"* (pregunta de seguimiento, el historial de la conversación se acumula)
+>
+> El sistema envía el historial completo (~2.300 palabras) y genera otra respuesta. **($34 COP)**
+>
+> **Costo total de la conversación (2 preguntas):** ~$66 COP
+>
+> **Costo promedio por conversación** (contando conversaciones de 1, 2 y hasta 3 preguntas): **~$65 COP**
 
 ### 3.1 Desarrollo
 
@@ -212,11 +218,11 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 | Login y control de acceso | ~$0 |
 | Servidores en la nube (3 servicios + balanceador) | ~$196.000 |
 | Base de datos | ~$58.000 |
-| Inteligencia artificial (~1.000 consultas) | ~$35.000 |
+| Inteligencia artificial (~1.000 conversaciones) | ~$65.000 |
 | Almacenamiento y entrega de contenido | ~$3.000 |
 | Monitoreo y registros | ~$26.000 |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$147.000 |
-| **Total** | **~$465.000/mes** |
+| **Total** | **~$495.000/mes** |
 
 ### 3.2 Piloto (5-10 asesores)
 
@@ -227,26 +233,26 @@ Misma arquitectura que desarrollo. La BD se apaga tras 1 hora sin actividad (no 
 | Login y control de acceso | ~$0 |
 | Servidores en la nube (3 servicios + balanceador) | ~$196.000 |
 | Base de datos | ~$58.000 |
-| Inteligencia artificial (~5.000 consultas) | ~$175.000 |
+| Inteligencia artificial (~3.000 conversaciones) | ~$195.000 |
 | Almacenamiento y entrega de contenido | ~$3.000 |
 | Monitoreo y registros | ~$26.000 |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$147.000 |
-| **Total** | **~$605.000/mes** |
+| **Total** | **~$625.000/mes** |
 
 ### 3.3 Producción (100 asesores)
 
-Cada asesor hace ~30 consultas/día, ~600/mes. Total: ~60.000 consultas/mes.
+Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesores): ~40.000 conversaciones/mes.
 
 | Servicio | Costo/mes (COP) |
 |----------|-----------------|
 | Login y control de acceso | ~$0 |
 | Servidores en la nube (3 servicios con réplicas + balanceador) | ~$476.000 |
 | Base de datos | ~$245.000 |
-| Inteligencia artificial (~60.000 consultas) | ~$2.100.000 |
+| Inteligencia artificial (~40.000 conversaciones) | ~$2.600.000 |
 | Almacenamiento y entrega de contenido | ~$28.000 |
 | Monitoreo y registros | ~$104.000 |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
-| **Total** | **~$3.153.000/mes** |
+| **Total** | **~$3.653.000/mes** |
 
 ### 3.4 Crecimiento (200-500+ asesores)
 
@@ -255,9 +261,9 @@ Cada asesor hace ~30 consultas/día, ~600/mes. Total: ~60.000 consultas/mes.
 | Login y control de acceso | ~$10.000 |
 | Servidores en la nube (4 servicios con réplicas + balanceadores) | ~$1.045.000 |
 | Base de datos | ~$486.000 |
-| Inteligencia artificial (~300.000 consultas) | ~$10.500.000 |
+| Inteligencia artificial (~200.000 conversaciones) | ~$13.000.000 |
 | Almacenamiento y entrega de contenido | ~$62.000 |
 | Monitoreo y registros | ~$242.000 |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$350.000 |
-| **Total** | **~$12.695.000/mes** |
+| **Total** | **~$15.195.000/mes** |
 

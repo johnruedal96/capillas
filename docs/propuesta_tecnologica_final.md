@@ -308,7 +308,7 @@ Los precios están calculados para un uso promedio de **20 conversaciones al dí
 | Concepto | Valor |
 |----------|-------|
 | Precio mensual | $5.500.000 COP |
-| Incluye | Soporte + toda la infraestructura en la nube |
+| Incluye | Soporte con SLA + toda la infraestructura en la nube |
 | Límite incluido | Hasta 40.000 conversaciones/mes (~20/día × 100 asesores) |
 | Si excede el límite | $85 COP (~$0,025 USD) por conversación adicional |
 
@@ -317,9 +317,17 @@ Los precios están calculados para un uso promedio de **20 conversaciones al dí
 | Concepto | Valor |
 |----------|-------|
 | Precio mensual | $20.000.000 COP |
-| Incluye | Soporte + toda la infraestructura en la nube |
+| Incluye | Soporte con SLA + toda la infraestructura en la nube |
 | Límite incluido | Hasta 200.000 conversaciones/mes (~20/día × 500 asesores) |
 | Si excede el límite | $85 COP (~$0,025 USD) por conversación adicional |
+
+### 4.4 Acuerdo de Nivel de Servicio (SLA)
+
+| Prioridad | Definición | Tiempo de respuesta | Tiempo de resolución |
+|---|---|---|---|
+| **Crítico** | Plataforma completamente caída — ningún asesor puede operar | 1 hora | 4 horas |
+| **Alto** | Funciona pero con errores que afectan a varios asesores | 2 horas | 8 horas |
+| **Normal** | Bugs menores, dudas de uso, ajustes no urgentes | 24 horas | 72 horas |
 
 ---
 

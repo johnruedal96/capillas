@@ -20,12 +20,12 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 | **Widget (chat en web)** | [Lit 3](https://lit.dev/docs/) - componente web, compatible con cualquier navegador moderno. | Se actualiza desde la nube. Funciona en cualquier dispositivo: computador, tableta o celular. |
 | **Gestor documental** | Panel web para carga y administración de documentos. | El chat funciona con la información que se cargue aquí. |
 | **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) - sistema de login gestionado por AWS | Cada asesor tiene su propio usuario y contraseña. Se puede activar doble factor de autenticación. |
-| **Backend (lógica del negocio)** | [FastAPI](https://fastapi.tiangolo.com/) (Python) + [gRPC](https://grpc.io/docs/) - tecnología moderna de APIs, la misma que usan empresas como Uber y Netflix | Procesa cada consulta en milisegundos. Soporta cientos de asesores simultáneos. |
+| **Backend (lógica del negocio)** | [FastAPI](https://fastapi.tiangolo.com/) (Python) + [gRPC](https://grpc.io/docs/) - tecnología moderna de APIs probada a gran escala | Procesa cada consulta en milisegundos. Soporta cientos de asesores simultáneos. |
 | **Buscador inteligente (RAG)** | [LlamaIndex](https://docs.llamaindex.ai/) - motor de búsqueda aumentada con IA, el estándar de la industria para sistemas de preguntas y respuestas sobre documentos propios | Busca en los documentos para responder con información real. Cada respuesta viene con la fuente de dónde se obtuvo. |
 | **Base de datos de documentos** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) - base de datos que entiende texto | Almacena y organiza los documentos. Cuando nadie la usa, se apaga para ahorrar costos. |
 | **Generación de respuestas** | [Claude Sonnet](https://aws.amazon.com/bedrock/claude/) - modelo de inteligencia artificial de última generación | Genera respuestas detalladas basadas en los documentos cargados |
 | **Infraestructura** | [AWS](https://aws.amazon.com/) - la nube más usada del mundo, sin servidores que administrar | No hay servidores físicos que mantener. |
-| **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) para llaves de cifrado | Todos los datos viajan y se almacenan cifrados. |
+| **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) para la información en tránsito | La información viaja cifrada. Se almacenan los documentos y sus índices, y los chats se guardan anonimizados por un tiempo definido. |
 | **Monitoreo** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) - panel de control en tiempo real | Monitoreo en tiempo real. |
 | **Actualizaciones automáticas** | [GitHub Actions](https://docs.github.com/en/actions) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) - despliegue continuo | Cada mejora o corrección se publica en minutos sin intervención manual. |
 
@@ -148,8 +148,8 @@ flowchart TB
 
     subgraph AWS["Infraestructura en la nube"]
         A[Validación de<br/>identidad y permisos]
-        B[Comunicación interna<br/>protegida]
-        C[Anonimización automática]
+        B[Anonimización automática]
+        C[Comunicación interna<br/>protegida]
     end
 
     TLS --> A
@@ -244,8 +244,8 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 | Inteligencia artificial (~1.000 conversaciones) | ~$65.000 |
 | Almacenamiento y entrega de contenido | ~$3.000 |
 | Monitoreo y registros | ~$26.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$147.000 |
-| **Total** | **~$495.000/mes** |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
+| **Total** | **~$548.000/mes** |
 
 ### 3.2 Piloto (5-10 asesores)
 
@@ -259,8 +259,8 @@ Misma arquitectura que desarrollo. La BD se apaga tras 1 hora sin actividad (no 
 | Inteligencia artificial (~3.000 conversaciones) | ~$195.000 |
 | Almacenamiento y entrega de contenido | ~$3.000 |
 | Monitoreo y registros | ~$26.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$147.000 |
-| **Total** | **~$625.000/mes** |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
+| **Total** | **~$678.000/mes** |
 
 ### 3.3 Producción (100 asesores)
 
@@ -274,8 +274,8 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Inteligencia artificial (~40.000 conversaciones) | ~$2.600.000 |
 | Almacenamiento y entrega de contenido | ~$28.000 |
 | Monitoreo y registros | ~$104.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 |
-| **Total** | **~$3.653.000/mes** |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$250.000 |
+| **Total** | **~$3.703.000/mes** |
 
 ### 3.4 Crecimiento (200-500+ asesores)
 
@@ -287,8 +287,8 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 | Inteligencia artificial (~200.000 conversaciones) | ~$13.000.000 |
 | Almacenamiento y entrega de contenido | ~$62.000 |
 | Monitoreo y registros | ~$242.000 |
-| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$350.000 |
-| **Total** | **~$15.195.000/mes** |
+| Infraestructura adicional (red, seguridad, DNS, etc.) | ~$400.000 |
+| **Total** | **~$15.245.000/mes** |
 
 ---
 
@@ -315,7 +315,7 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 
 | Concepto | Valor |
 |----------|-------|
-| Precio mensual | $18.500.000 COP |
+| Precio mensual | $20.000.000 COP |
 | Incluye | Soporte + toda la infraestructura en la nube |
 | Límite incluido | Hasta 200.000 conversaciones/mes (~20/día × 500 asesores) |
 | Si excede el límite | $85 COP por conversación adicional |

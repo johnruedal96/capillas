@@ -17,7 +17,7 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 
 | Capa | Tecnología | Por qué es importante |
 |------|-----------|----------------------|
-| **Widget (chat en web)** | [Lit 3](https://lit.dev/docs/) - componente web, compatible con cualquier navegador moderno. | Se actualiza desde la nube. Funciona en cualquier dispositivo. |
+| **Widget (chat en web)** | [Lit 3](https://lit.dev/docs/) - componente web, compatible con cualquier navegador moderno. | Se actualiza desde la nube. Funciona en cualquier dispositivo: computador, tableta o celular. |
 | **Gestor documental** | Panel web para carga y administración de documentos. | El chat funciona con la información que se cargue aquí. |
 | **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) - sistema de login gestionado por AWS | Cada asesor tiene su propio usuario y contraseña. Se puede activar doble factor de autenticación. |
 | **Backend (lógica del negocio)** | [FastAPI](https://fastapi.tiangolo.com/) (Python) + [gRPC](https://grpc.io/docs/) - tecnología moderna de APIs, la misma que usan empresas como Uber y Netflix | Procesa cada consulta en milisegundos. Soporta cientos de asesores simultáneos. |
@@ -157,18 +157,11 @@ flowchart TB
     B --> C
 ```
 
-### 2.4 Privacidad de datos - Ley 1581 de 2012
+### 2.4 Privacidad de datos personales
 
-No almacenamos datos personales de clientes. El único registro que se guarda son los chats (ya anonimizados) para monitoreo de calidad, por un tiempo definido por el negocio. Antes de llegar a la IA, cualquier información personal (nombres, documentos, teléfonos, direcciones, etc.) se reemplaza con datos anónimos usando un filtro automático. La IA nunca recibe información personal.
+El sistema está diseñado para no almacenar datos personales de clientes. Nuestras bases de datos solo contienen información de conocimiento (tarifas, planes, procesos, etc). Si un asesor menciona un nombre, documento o teléfono en el chat, un filtro automático lo reemplaza con datos anónimos antes de que llegue al modelo de IA o se guarde en los registros. La IA nunca recibe información personal.
 
-Cumplimos la ley así:
-
-| Requisito de la ley | Cómo lo cumplimos |
-|-|-|
-| **Consentimiento** | El asesor informa al cliente que la conversación es asistida por IA. No se pide autorización para guardar — no se almacenan datos personales |
-| **Propósito definido** | La IA solo asiste en la asesoría comercial. No se entrenan modelos ni se comparten datos con terceros |
-| **Datos mínimos** | No almacenamos datos personales. Los chats de monitoreo se guardan sin información que identifique al cliente |
-| **Datos protegidos** | La información viaja cifrada (TLS 1.3). Los datos personales se eliminan automáticamente antes de llegar a la IA o guardarse |
+Los chats anonimizados se guardan por un tiempo definido por el negocio para monitoreo de calidad. No se pueden reconstruir los datos originales a partir de los registros.
 
 ---
 
@@ -343,6 +336,12 @@ Los documentos y datos son de Capillas. Si deciden terminar, entregamos toda la 
 
 **¿Necesitamos un técnico para operar esto?**
 No. La operación del día a día la hace cualquier persona administrativa: subir documentos y ver reportes. Nosotros manejamos la parte técnica.
+
+**¿Quién es el dueño del código y los documentos?**
+El código del sistema, la infraestructura y las configuraciones técnicas son nuestras. Los documentos que Capillas cargue (tarifas, planes, coberturas) y la información que de ellos se derive siguen siendo de Capillas.
+
+**¿Funciona en celular o solo en computador?**
+Funciona en ambos. El widget de chat se adapta automáticamente al tamaño de la pantalla, y la app completa también es compatible con dispositivos móviles. El asesor puede usarlo desde cualquier navegador.
 
 **¿Qué necesitamos de nuestra parte para arrancar?**
 - Documentos comerciales (tarifas, planes, coberturas) en Word o PDF

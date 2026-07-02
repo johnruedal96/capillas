@@ -5,8 +5,8 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 
 ## Índice
 
-1. [Stack Tecnológico](#1-stack-tecnológico)
-2. [Arquitectura del Sistema](#2-arquitectura-del-sistema)
+1. [Stack tecnológico](#1-stack-tecnológico)
+2. [Arquitectura del sistema](#2-arquitectura-del-sistema)
 3. [Costos de Infraestructura](#3-costos-de-infraestructura)
 4. [Planes y Precios](#4-planes-y-precios)
 5. [Preguntas Frecuentes](#5-preguntas-frecuentes)
@@ -50,7 +50,7 @@ Existen **dos formas** de implementarlo:
 **Opción 1 — Widget solo:**
 
 ```mermaid
-graph TB
+flowchart TB
     subgraph AWS["Infraestructura en la nube"]
         GW[Entrada segura]
         BFF[Lógica del negocio]
@@ -79,7 +79,7 @@ graph TB
 **Opción 2 — App completa:**
 
 ```mermaid
-graph TB
+flowchart TB
     subgraph AWS["Infraestructura en la nube"]
         GW[Entrada segura]
         BFF[Lógica del negocio]
@@ -170,7 +170,7 @@ Los documentos que se suben al sistema (tarifas, planes, coberturas) no debería
 ### 2.6 Matriz de amenazas y mitigaciones
 
 | Amenaza | ¿Qué pasaría? | Cómo lo evitamos |
-|-|-|-|
+|---|---|---|
 | **Interceptación de datos** | Alguien intercepta la comunicación entre el asesor y el sistema | Todo viaja cifrado con TLS 1.3. Un atacante solo ve datos cifrados |
 | **Fuga de datos personales** | La IA recibe nombres, documentos o teléfonos de clientes y podrían filtrarse | Un filtro automático reemplaza cualquier dato personal con información anónima antes de llegar a la IA |
 | **Robo de sesión** | Alguien roba el token de acceso y se hace pasar por un asesor | Los tokens expiran cada 15 minutos y se renuevan automáticamente. |
@@ -183,7 +183,7 @@ Los documentos que se suben al sistema (tarifas, planes, coberturas) no debería
 Una respuesta errónea sobre una edad de cobertura o un precio puede generar una reclamación. Por eso implementamos varias capas para evitar que la IA invente información:
 
 | Capa | Cómo funciona | Por qué importa |
-|-|-|-|
+|---|---|---|
 | **Reglas fijas de comportamiento** | La IA tiene instrucciones explícitas: solo responder con información de los documentos. Si no encuentra la respuesta, dice "No tengo esa información" | Nunca inventa precios, edades ni coberturas |
 | **Filtro de información no verificada** | El sistema revisa que la respuesta solo contenga datos que están en los documentos cargados. Si detecta información numérica (edades, precios) que no está en los documentos, fuerza una advertencia al asesor | Evita que el asesor comparta información no respaldada |
 | **Umbral de confianza** | Si un documento no se parece lo suficiente a lo que preguntó el asesor, se descarta automáticamente. Si no queda ningún documento útil, el sistema responde que no tiene información | El asesor solo recibe respuestas basadas en documentos realmente relevantes |
@@ -193,7 +193,7 @@ Una respuesta errónea sobre una edad de cobertura o un precio puede generar una
 
 | Aspecto | Cómo lo manejamos |
 |---------|-------------------|
-| **Disponibilidad esperada** | 99.5% del tiempo (~3.5 horas de interrupción al mes como máximo) |
+| **Disponibilidad esperada** | 99.5% del tiempo (~3.6 horas de interrupción al mes como máximo) |
 | **Fallos de servidores** | Los servicios se ejecutan en múltiples zonas. Si una zona falla, el sistema sigue funcionando desde otra |
 | **Pérdida de base de datos** | La base de datos se respalda automáticamente todos los días. Podemos restaurar a cualquier punto en los últimos 30 días |
 | **Fallo de la IA** | Si la IA no responde, el sistema muestra un mensaje claro al asesor. No se pierde información ni consultas |

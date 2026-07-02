@@ -22,8 +22,8 @@ Asistente conversacional con IA que se integra en la web. Los asesores preguntan
 | **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) - sistema de login gestionado por AWS | Cada asesor tiene su propio usuario y contraseña. Se puede activar doble factor de autenticación. |
 | **Backend (lógica del negocio)** | [FastAPI](https://fastapi.tiangolo.com/) (Python) + [gRPC](https://grpc.io/docs/) - tecnología moderna de APIs probada a gran escala | Procesa cada consulta en milisegundos. Soporta cientos de asesores simultáneos. |
 | **Buscador inteligente (RAG)** | [LlamaIndex](https://docs.llamaindex.ai/) - motor de búsqueda aumentada con IA, el estándar de la industria para sistemas de preguntas y respuestas sobre documentos propios | Busca en los documentos para responder con información real. Cada respuesta viene con la fuente de dónde se obtuvo. |
-| **Base de datos de documentos** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) - base de datos que entiende texto | Almacena y organiza los documentos. Reduce su capacidad al mínimo automático cuando nadie la usa para minimizar costos, escalando al instante cuando los asesores se conectan. |
-| **Generación de respuestas** | [Claude Sonnet](https://aws.amazon.com/bedrock/claude/) - modelo de inteligencia artificial de última generación | Genera respuestas detalladas basadas en los documentos cargados |
+| **Base de datos de documentos** | [RDS PostgreSQL](https://aws.amazon.com/rds/postgresql/) + [pgvector](https://github.com/pgvector/pgvector) - base de datos relacional con capacidad de búsqueda vectorial | Almacena y organiza los documentos. Tiene un costo fijo predecible. Se puede apagar fuera de horario laboral para ahorrar en desarrollo y piloto. |
+| **Generación de respuestas** | [Claude Sonnet 4.6](https://aws.amazon.com/bedrock/claude/) - el modelo de inteligencia artificial más reciente de Anthropic en AWS Bedrock | Genera respuestas detalladas basadas en los documentos cargados |
 | **Infraestructura** | [AWS](https://aws.amazon.com/) - la nube más usada del mundo, sin servidores que administrar | No hay servidores físicos que mantener. |
 | **Seguridad** | [Cifrado TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) para la información en tránsito | La información viaja cifrada. Se almacenan los documentos y sus índices, y los chats se guardan anonimizados por un tiempo definido. |
 | **Monitoreo** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) - panel de control en tiempo real | Monitoreo en tiempo real. |
@@ -217,7 +217,7 @@ El sistema mide automáticamente la calidad de las respuestas:
 
 TRM de referencia: **$1 USD = $3,450 COP**.
 
-**Precio del modelo de IA (Claude 4.6 Sonnet):**
+**Precio del modelo de IA (Claude Sonnet 4.6):**
 - Entrada (texto que recibe): ~$10.350 COP por millón de tokens
 - Salida (texto que genera): ~$51.750 COP por millón de tokens
 
@@ -250,18 +250,16 @@ TRM de referencia: **$1 USD = $3,450 COP**.
 
 ### 3.2 Piloto (5-10 asesores)
 
-Misma arquitectura que desarrollo. La BD se apaga tras 1 hora sin actividad (no se apaga durante el día porque los asesores hacen consultas con frecuencia).
-
 | Servicio | Costo/mes (COP / USD) |
 |----------|----------------------|
 | Login y control de acceso | ~$0 |
 | Servidores en la nube (3 servicios + balanceador) | ~$196.000 COP (~$57 USD) |
-| Base de datos (Aurora Serverless v2) | ~$58.000 COP (~$17 USD) |
+| Base de datos (RDS db.t4g.small, se apaga fuera de horario) | ~$40.000 COP (~$12 USD) |
 | Inteligencia artificial (~3.000 conversaciones) | ~$195.000 COP (~$57 USD) |
 | Almacenamiento y entrega de contenido | ~$3.000 COP (~$1 USD) |
 | Monitoreo y registros | ~$26.000 COP (~$8 USD) |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$200.000 COP (~$58 USD) |
-| **Total** | **~$678.000 COP (~$197 USD)** |
+| **Total** | **~$660.000 COP (~$191 USD)** |
 
 ### 3.3 Producción (100 asesores)
 
@@ -271,12 +269,12 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 |----------|----------------------|
 | Login y control de acceso | ~$0 |
 | Servidores en la nube (3 servicios con réplicas + balanceador) | ~$476.000 COP (~$138 USD) |
-| Base de datos (Aurora Serverless v2) | ~$245.000 COP (~$71 USD) |
+| Base de datos (RDS db.t4g.medium) | ~$180.000 COP (~$52 USD) |
 | Inteligencia artificial (~40.000 conversaciones) | ~$2.600.000 COP (~$754 USD) |
 | Almacenamiento y entrega de contenido | ~$28.000 COP (~$8 USD) |
 | Monitoreo y registros | ~$104.000 COP (~$30 USD) |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$250.000 COP (~$72 USD) |
-| **Total** | **~$3.703.000 COP (~$1.073 USD)** |
+| **Total** | **~$3.638.000 COP (~$1.054 USD)** |
 
 ### 3.4 Crecimiento (200-500+ asesores)
 
@@ -284,12 +282,12 @@ Cada asesor tiene ~20 conversaciones/día, ~400/mes. En Producción (100 asesore
 |----------|----------------------|
 | Login y control de acceso | ~$10.000 COP (~$3 USD) |
 | Servidores en la nube (4 servicios con réplicas + balanceadores) | ~$1.045.000 COP (~$303 USD) |
-| Base de datos (Aurora Serverless v2) | ~$486.000 COP (~$141 USD) |
+| Base de datos (RDS db.r6g.large) | ~$350.000 COP (~$101 USD) |
 | Inteligencia artificial (~200.000 conversaciones) | ~$13.000.000 COP (~$3.768 USD) |
 | Almacenamiento y entrega de contenido | ~$62.000 COP (~$18 USD) |
 | Monitoreo y registros | ~$242.000 COP (~$70 USD) |
 | Infraestructura adicional (red, seguridad, DNS, etc.) | ~$400.000 COP (~$116 USD) |
-| **Total** | **~$15.245.000 COP (~$4.419 USD)** |
+| **Total** | **~$15.109.000 COP (~$4.379 USD)** |
 
 ---
 

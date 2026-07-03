@@ -1,0 +1,9 @@
+planes/plan-familiar-premium.md
+plan familiar premium, cobertura completa, sala privada, familia, 3 a 5 personas, titular 25 a 60 años, nivel socioeconomico medio alto
+
+planes/plan-basico-individual.md
+plan basico individual, cobertura basica, individual, persona sola, 18 a 70 años, nivel socioeconomico bajo medio
+
+cliente de 33 años soltero, quiere consultar que planes hay para él
+cliente de 33 años casado y con 2 hijos, quiere consultar que planes hay para él
+cliente de 70 años casado y con 2 hijos, quiere consultar que planes hay para él

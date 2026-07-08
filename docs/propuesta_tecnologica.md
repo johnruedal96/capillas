@@ -41,7 +41,7 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **LLM Principal** | [Claude Sonnet 4.6](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$10.350/$51.750 COP por MTok, 200K contexto |
 | **LLM Económico** | [Claude Haiku 4.5](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$3.450/$17.250 COP por MTok, tareas simples alto volumen |
 | **Caché** | [ElastiCache Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) + [Semantic Cache](https://python.langchain.com/docs/how_to/contextual_compression/) (propuesta sujeta a pruebas — el negocio funerario tiene respuestas muy sensibles al contexto: una consulta de "planes para contratar" es distinta a "acabo de perder un ser querido", lo que puede reducir el hit rate del caché semántico) | Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%**. Latencia <10ms en cache hit |
-| **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes |
+| **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes. KB API en Lambda (escala a 0) |
 | **Cifrado** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [ACM (TLS 1.3)](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) todo el canal + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | ACM gratuito, KMS ~$3.450/key/mes COP |
 | **Observabilidad** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) (self-hosted) + [Grafana](https://grafana.com/docs/) | Datos soberanos, trazabilidad completa |
 | **CI/CD** | [GitHub Actions](https://docs.github.com/en/actions) + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) | Despliegue automatizado [blue/green](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html) |
@@ -52,9 +52,10 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 
 | Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
 |-------|-----------------|------------------|----------|-------------|
-| **MVP / Desarrollo** | ~$150-170/mes | ~$521.000-586.000 | < 10 asesores | 1-2 microservicios, instancias pequeñas + QA |
-| **Producción (100 asesores)** | ~$625-750/mes | ~$2.150.000-2.580.000 | 100 asesores | 4-5 servicios, HA parcial, incluye infraestructura de red |
-| **Escalado (500+ asesores)** | ~$1.440-1.560/mes | ~$4.955.000-5.382.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
+| **Desarrollo** | ~$158/mes | ~$546.000 | < 10 asesores | 1 ECS (RAG + Analytics) + Lambda (KB + Auth), apagado nocturno |
+| **Piloto (5-10 asesores)** | ~$252/mes | ~$869.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
+| **Producción (100 asesores)** | ~$1.034/mes | ~$3.567.000 | 100 asesores | 2 ECS (RAG + Analytics) + Lambda + RDS, 24/7 |
+| **Escalado (500+ asesores)** | ~$3.875/mes | ~$13.369.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
 
 ---
 
@@ -68,9 +69,9 @@ El sistema soporta **dos modalidades de despliegue** según la infraestructura q
 |---------|----------------------|------------------------|
 | **¿Quién provee la app anfitriona?** | Capillas de la Fe (su app existente: WordPress, React, etc.) | Nosotros creamos una app SPA minimalista |
 | **¿Quién maneja el login?** | Capillas de la Fe (su propio sistema de auth existente) | Nosotros ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)) |
-| **¿Cómo recibe el token el widget?** | Frontend usa SDK Capillas (CDN). SDK hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con BFF → recibe [JWT](https://datatracker.ietf.org/doc/html/rfc7519) → lo pasa al widget vía atributo `token` | Flujo [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) manejado por el widget |
+| **¿Cómo recibe el token el widget?** | Frontend usa SDK Capillas (CDN). SDK hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con Auth Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) → recibe [JWT](https://datatracker.ietf.org/doc/html/rfc7519) → lo pasa al widget vía atributo `token` | Flujo [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) manejado por el widget |
 | **Widget muestra login UI** | ❌ No — el frontend obtiene token via SDK sin intervención del usuario | ✅ Sí — el widget abre ventana [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) |
-| **Cognito necesario** | ❌ No — el BFF genera y firma el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) con su propio secreto. El frontend del cliente autentica usuarios con su sistema, llama a nuestro SDK (CDN), que hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con el BFF y recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nosotros | ✅ Sí — [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) maneja [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636). Los tokens (Access, Refresh, ID) los genera Cognito |
+| **Cognito necesario** | ❌ No — la Auth Lambda genera y firma el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) con su propia key. El frontend del cliente autentica usuarios con su sistema, llama a nuestro SDK (CDN), que hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con la Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) y recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nosotros | ✅ Sí — [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) maneja [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636). Los tokens (Access, Refresh, ID) los genera Cognito |
 | **Complejidad de integración** | Baja — el desarrollador del cliente agrega `<script>`, llama a `CapillasAuth.exchange()` y pasa el token al widget. No requiere configurar [OAuth](https://datatracker.ietf.org/doc/html/rfc6749), redirect URIs, ni flujos de autorización | Media — requiere configurar Cognito User Pool, Client IDs, OAuth scopes, redirect URIs, y manejar el flujo [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) |
 | **Ideal para** | Capillas ya tiene app con login propio | Capillas NO tiene app o quiere login gestionado |
 
@@ -82,11 +83,12 @@ graph TB
     end
 
     subgraph AWS["AMAZON WEB SERVICES"]
-        GW[API Gateway HTTP]
-        BFF[BFF Service FastAPI]
+        GW[API Gateway HTTP<br/>JWT Auth + Rate Limiting]
         AUTH[Amazon Cognito<br/>Solo en Opción 2]
+        AUTH_LAMBDA[Auth Handshake Lambda<br/>Solo en Opción 1]
         ANALYTICS[Analytics Service]
-        RAG[RAG Service LlamaIndex]
+        RAG[RAG Service FastAPI<br/>SSE streaming + LlamaIndex]
+        LAMBDA_KB[KB API Lambda<br/>CRUD docs + presigned URLs]
         AURORA[Aurora pgvector]
         REDIS[Redis Cache]
         BEDROCK[Bedrock Claude]
@@ -102,19 +104,20 @@ graph TB
     HOST -->|Carga widget desde CDN| CF
     HOST -->|Opción 1: SDK handshake RSA<br/>→ recibe JWT → atributo token| WIDGET
     HOST -->|Opción 2: incluye login Cognito| AUTH
-    WIDGET -->|POST cifrado| GW
-    GW -->|HTTP| BFF
+    WIDGET -->|Chat + KB Admin| GW
+    GW -->|Valida JWT + rate limit → HTTP| RAG
+    GW -->|KB operations| LAMBDA_KB
+    GW -->|"Auth handshake (Opción 1)"| AUTH_LAMBDA
+    LAMBDA_KB -->|Presigned URL → subida directa| S3
+    LAMBDA_KB -->|CRUD metadata| AURORA
     GW -->|Async| ANALYTICS
-    BFF -->|gRPC mTLS| RAG
-    BFF -->|SQS| ANALYTICS
     RAG -->|pgvector| AURORA
     RAG -->|Cache| REDIS
     RAG -->|Bedrock API| BEDROCK
     KMS -.->|Encripta| AURORA
     KMS -.->|Encripta| REDIS
-    KBADMIN[KB Admin Widget<br/>Panel de gestión documentos] -->|Sube docs cifrados| S3
-    S3 -->|Evento| STEP
-    STEP -->|Procesa| RAG
+    S3 -->|Evento de subida| STEP
+    STEP -->|Procesa y embebe| RAG
 ```
 
 ### 2.2 Flujo de Consulta (Asesor → Respuesta)
@@ -123,7 +126,7 @@ graph TB
 sequenceDiagram
     participant A as Asesor
     participant W as Widget
-    participant B as BFF Service
+    participant GW as API Gateway
     participant R as RAG Service
     participant V as Aurora pgvector
     participant C as Redis Cache
@@ -131,10 +134,9 @@ sequenceDiagram
 
     A->>W: Que plan para familia de 4?
     W->>W: Sigilo del túnel TLS 1.3 — el payload viaja cifrado de extremo a extremo
-    W->>B: POST /api/chat body cifrado
-    B->>B: Lambda descifra payload
-    Note over B: Valida JWT y contexto
-    B->>R: gRPC Query(query)
+    W->>GW: POST /api/chat<br/>Authorization: Bearer JWT
+    GW->>GW: Valida JWT + rate limit
+    GW->>R: HTTP /api/chat
     R->>R: Query Rewrite
     R->>C: Cache Lookup
     alt Cache HIT
@@ -147,10 +149,8 @@ sequenceDiagram
         L-->>R: Respuesta y fuentes
         R->>C: Guardar en cache
     end
-    R-->>B: Response y fuentes
-    B->>B: Cifrar respuesta
-    B-->>W: SSE stream cifrado
-    W->>W: Descifrar con key
+    R-->>GW: SSE stream
+    GW-->>W: SSE stream cifrado
     W-->>A: Plan Familiar Premium
 ```
 
@@ -160,22 +160,25 @@ sequenceDiagram
 
 #### Opción 1 — Auth delegada al Host (Capillas maneja login)
 
-Cuando Capillas ya tiene su propio sistema de autenticación, el frontend del cliente obtiene un token de sesión mediante un **handshake cifrado** con nuestro backend. El cliente no escribe crypto — solo importa nuestro script CDN y llama a una función.
+Cuando Capillas ya tiene su propio sistema de autenticación, el frontend del cliente obtiene un token de sesión mediante un **handshake cifrado** con una Lambda serverless. El cliente no escribe crypto — solo importa nuestro script CDN y llama a una función.
 
 ```mermaid
 sequenceDiagram
     participant Front as Frontend Cliente
     participant SDK as SDK Capillas (CDN)
-    participant BFF as BFF Service
+    participant GW as API Gateway
+    participant Lambda as Auth Handshake Lambda
 
     Note over Front: Usuario ya autenticado<br/>en sistema del cliente
     Front->>SDK: CapillasAuth.exchange({<br/>  userId, email, name<br/>})
-    SDK-->>BFF: GET /.well-known/public-key
-    BFF-->>SDK: { publicKey: JWK }
+    SDK-->>GW: GET /.well-known/public-key
+    GW->>Lambda: Proxy a Lambda
+    Lambda-->>SDK: { publicKey: JWK }
     SDK->>SDK: Genera AES key + nonce<br/>Cifra payload con RSA-OAEP<br/>payload = { userId, email, name,<br/>  client_key, client_nonce,<br/>  timestamp, nonce_rsa }
-    SDK->>BFF: POST /auth/handshake<br/>Body: base64(ciphertext_rsa)
-    BFF->>BFF: Descifra con RSA priv key<br/>Valida nonce + timestamp<br/>Genera JWT de sesión
-    BFF->>SDK: Body: base64(ciphertext_aes)<br/>cifrado con client_key del front
+    SDK->>GW: POST /auth/handshake<br/>Body: base64(ciphertext_rsa)
+    GW->>Lambda: Proxy a Lambda
+    Lambda->>Lambda: Descifra con RSA priv key<br/>Valida nonce + timestamp<br/>Genera JWT de sesión<br/>Firmado con key que API Gateway confía
+    Lambda-->>SDK: Body: base64(ciphertext_aes)<br/>cifrado con client_key del front
     SDK->>SDK: Descifra con AES key<br/>→ obtiene session_token
     SDK-->>Front: Retorna session_token
     Front->>Widget: <chat-widget token="eyJ...">
@@ -184,11 +187,11 @@ sequenceDiagram
 
 El cliente solo necesita importar nuestro SDK (alojado en CDN) y llamar a una función con los datos del usuario que ya tiene por su login (ID, nombre, email). El SDK internamente:
 
-1. Obtiene la llave [RSA](https://datatracker.ietf.org/doc/html/rfc8017) pública de nuestro backend desde un endpoint público
+1. Obtiene la llave [RSA](https://datatracker.ietf.org/doc/html/rfc8017) pública de nuestra Lambda Auth desde un endpoint público en API Gateway
 2. Genera una clave [AES-256](https://csrc.nist.gov/publications/detail/sp/800-38d/final) temporal y un número aleatorio de un solo uso (nonce)
 3. Cifra los datos del usuario junto con la clave [AES](https://csrc.nist.gov/publications/detail/sp/800-38d/final) y el nonce usando [RSA](https://datatracker.ietf.org/doc/html/rfc8017)
-4. Envía todo a nuestro backend (`POST /auth/handshake`)
-5. Nuestro backend descifra con su llave privada, valida que el nonce no se haya usado antes (anti-replay), y genera un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) de sesión con vigencia de 15 minutos
+4. Envía todo a nuestra Lambda Auth via API Gateway (`POST /auth/handshake`)
+5. La Lambda descifra con su llave privada, valida que el nonce no se haya usado antes (anti-replay), y genera un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) de sesión con vigencia de 15 minutos, firmado con una key que API Gateway reconoce
 6. Devuelve el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) cifrado con la clave [AES](https://csrc.nist.gov/publications/detail/sp/800-38d/final) que el SDK generó
 7. El SDK descifra la respuesta y entrega el token al cliente
 
@@ -197,12 +200,12 @@ El cliente solo necesita importar nuestro SDK (alojado en CDN) y llamar a una fu
 - La clave [AES](https://csrc.nist.gov/publications/detail/sp/800-38d/final) vive solo en memoria RAM del navegador y no se puede exportar ni leer desde la consola
 - El nonce + timestamp evita que un atacante re-envíe una solicitud interceptada (replay attack)
 - [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS) restringido al dominio del cliente bloquea handshakes desde sitios externos
-- El token final es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nosotros → nuestro backend lo valida sin depender de sistemas externos
+- El token final es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por la Lambda con una key que [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) reconoce → API Gateway valida el JWT en cada request sin depender de sistemas externos
 - Todos los requests posteriores del widget viajan por [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). El token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) va en el header `Authorization: Bearer` dentro del canal cifrado
 
 #### Opción 2 — Auth gestionada (Nosotros manejamos login y app)
 
-Cuando Capillas no tiene app ni login, construimos una app SPA con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636):
+Cuando Capillas no tiene app ni login, construimos una app SPA con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636). El flujo PKCE permite que el **navegador** intercambie el código de autorización directamente con Cognito — no se necesita un backend intermedio. El Access Token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) resultante se envía en el header `Authorization: Bearer` a [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html), que lo valida contra el JWKS de Cognito de forma nativa.
 
 ```mermaid
 sequenceDiagram
@@ -210,7 +213,6 @@ sequenceDiagram
     participant Widget as Widget
     participant Popup as Ventana OAuth
     participant Cognito as Amazon Cognito
-    participant BFF as BFF Service
     participant GW as API Gateway
 
     App->>Widget: Carga widget
@@ -222,15 +224,13 @@ sequenceDiagram
     Asesor->>Popup: Credenciales
     Popup->>Cognito: Autenticar
     Cognito-->>Popup: Authorization Code
-    Popup->>BFF: POST /auth/token code + verifier
-    BFF->>Cognito: Token Request code
-    Cognito-->>BFF: Tokens AT RT ID
-    BFF->>BFF: Set HttpOnly cookie RT
-    BFF-->>Popup: Access Token
+    Popup->>Cognito: POST /oauth2/token<br/>code + code_verifier
+    Cognito-->>Popup: Access Token + Refresh Token
     Popup-->>App: postMessage access_token
     App->>Widget: Pasa token al widget
     Widget->>Widget: Almacenar AT in-memory
-    Widget->>GW: API Call con cifrado
+    Widget->>GW: API Call con JWT en header<br/>Authorization: Bearer
+    GW->>GW: Valida JWT contra Cognito JWKS
 ```
 
 ### 2.4 Flujo de Seguridad — TLS 1.3
@@ -240,20 +240,12 @@ graph LR
     WIDGET[Widget Lit 3 - Cliente]
     CF[CloudFront + WAF]
     GW[API Gateway]
-    BFF[BFF Service]
     RAG[RAG Service]
 
     WIDGET -->|HTTPS POST cifrado por TLS 1.3| CF
     CF -->|Request cifrado| GW
-    GW -->|Valida JWT + rate limit| BFF
-    BFF -->|gRPC mTLS| RAG
-    BFF -->|Response cifrado| GW
-    GW --> LAMBDA
-    LAMBDA -->|Cifra response| WIDGET
-    WIDGET -.->|B2B: sin cifrar| GW
-
-    style LAMBDA fill:#e74c3c,color:#fff
-    style WIDGET fill:#3498db,color:#fff
+    GW -->|Valida JWT + rate limit| RAG
+    RAG -->|SSE stream cifrado vía GW| WIDGET
 ```
 
 ---
@@ -287,7 +279,7 @@ El widget se instala agregando un `<script>` tag y un [custom element](https://d
 
 El widget expone una API de comunicación bidireccional que soporta los dos modos de despliegue:
 
-**Opción 1 — Widget solo (host maneja auth):** El host importa nuestro SDK de autenticación (CDN) y llama a una función con los datos del usuario. El SDK hace el handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) con el BFF, recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) y lo retorna. El host pasa ese token al widget mediante atributo HTML, propiedad JS o postMessage.
+**Opción 1 — Widget solo (host maneja auth):** El host importa nuestro SDK de autenticación (CDN) y llama a una función con los datos del usuario. El SDK hace el handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) con la Auth Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html), recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) y lo retorna. El host pasa ese token al widget mediante atributo HTML, propiedad JS o postMessage.
 
 **Opción 2 — App completa (nosotros manejamos auth):** La app SPA que nosotros construimos maneja el flujo [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html). Obtiene el token mediante el flujo estándar (authorization code + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636)) y se lo pasa al widget.
 
@@ -298,7 +290,7 @@ La comunicación entre el host y el widget es bidireccional. El host puede pasar
 
 El manejo de tokens difiere según la opción de despliegue. En ambos modos, el widget **nunca** almacena tokens en localStorage o sessionStorage — solo en memoria volátil.
 
-**Opción 1 (Widget solo):** El host obtiene el token mediante el handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) (ver sección 2.3). El token es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nuestro backend con vigencia de 15 minutos. Cuando expira, el host repite el handshake para obtener uno nuevo.
+**Opción 1 (Widget solo):** El host obtiene el token mediante el handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) (ver sección 2.3). El token es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por la Auth Lambda con vigencia de 15 minutos. Cuando expira, el host repite el handshake para obtener uno nuevo.
 
 **Opción 2 (App completa):** La app SPA maneja el flujo [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html). Se utilizan tres tipos de token: Access Token ([JWT](https://datatracker.ietf.org/doc/html/rfc7519), 15 min, en memoria para API calls), Refresh Token (30 días, en cookie segura HttpOnly para renovar), e ID Token (1 hora, en memoria para perfil de usuario).
 
@@ -336,12 +328,16 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 | Autenticación | Opción 1: token del host<br/>Opción 2: [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) (rol admin) | Depende del modo de despliegue |
 | Cifrado | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | **Misma estrategia que el chat** — canal cifrado por TLS |
 | Hosting | [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | Mismo CDN, ruta `/admin/` |
-| API | Knowledge Base Service ([FastAPI](https://fastapi.tiangolo.com/)) | Endpoints protegidos con [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) |
+| API | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (Python 3.12) | Endpoints protegidos con [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). La Lambda escala a 0 cuando no hay actividad — solo se paga por uso |
 | Pipeline ingesta | [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) → [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) → [pgvector](https://github.com/pgvector/pgvector) | Automático |
 
-**Comunicación (idéntico al widget de chat):** El KB Admin Widget se comunica con [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) vía [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). El token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) viaja en el header `Authorization: Bearer`. Para comunicación interna entre servicios (dentro de la [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html)), se usa [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) o [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
+**Comunicación:** El KB Admin Widget se comunica con [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) vía [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). El token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) viaja en el header `Authorization: Bearer`. API Gateway enruta las peticiones CRUD del KB Admin a la [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) de Knowledge Base, que se conecta a [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) mediante [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html).
 
-**Flujo de ingesta de documentos:** El administrador sube un archivo (PDF, DOCX, MD, TXT) y el servicio lo guarda en [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) conservando el original intacto. Inmediatamente se dispara un flujo automático en [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) que: (1) **Convierte el documento a Markdown** — PDFs y DOCXs se transforman a Markdown preservando tablas, listas, títulos y jerarquía; TXT y MD se mantienen tal cual. El Markdown se almacena junto al original en S3. (2) Divide el Markdown en fragmentos semánticos. (3) Extrae metadatos (categoría, fecha, versión). (4) Genera vectores ([embeddings](https://platform.openai.com/docs/guides/embeddings)) con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html). (5) Almacena en [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) [pgvector](https://github.com/pgvector/pgvector). Los LLMs entienden Markdown de forma nativa — tablas, formato y jerarquía se preservan mucho mejor que con texto plano extraído de PDF.
+**Flujo de ingesta de documentos:** El administrador inicia la subida desde el KB Admin Widget. El widget solicita una **URL prefirmada** ([presigned URL](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)) a la [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html), que genera una URL con validez de 5 minutos. El widget sube el archivo directamente a [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) usando esa URL — el archivo nunca pasa por [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) ni por la Lambda (evita el límite de 10MB de API Gateway y el tiempo de ejecución de Lambda). El archivo original se conserva intacto en S3.
+
+Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) dispara un evento que inicia el flujo automático en [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html): (1) **Convierte el documento a Markdown** — PDFs y DOCXs se transforman a Markdown preservando tablas, listas, títulos y jerarquía; TXT y MD se mantienen tal cual. El Markdown se almacena junto al original en S3. (2) Divide el Markdown en fragmentos semánticos. (3) Extrae metadatos (categoría, fecha, versión). (4) Genera vectores ([embeddings](https://platform.openai.com/docs/guides/embeddings)) con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html). (5) Almacena en [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) [pgvector](https://github.com/pgvector/pgvector). Los LLMs entienden Markdown de forma nativa — tablas, formato y jerarquía se preservan mucho mejor que con texto plano extraído de PDF.
+
+> **Ventaja de la arquitectura Lambda + presigned URLs:** La Lambda de KB API solo se ejecuta cuando hay actividad administrativa (subir, listar, eliminar documentos). Con ~200 operaciones/mes y ~45 segundos por ejecución, el costo es inferior a **$1 USD/mes**. A diferencia de un servicio ECS que corre 24/7 (~$25/mes), la Lambda escala a 0 y solo consume recursos cuando se usa.
 
 > **Flujo de trabajo para TI (actualización de planes):** El proceso manual para mantener la base de conocimiento actualizada es:
 > 1. **Preparar** el documento nuevo (PDF, DOCX o MD) con las tarifas actualizadas siguiendo la misma estructura del anterior
@@ -353,28 +349,31 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 
 ### 3.2 Backend — Microservicios
 
-> **Nota sobre terminología:****
-> - **BFF** (Backend for Frontend): servicio intermediario entre el widget y los microservicios internos. Es el único servicio expuesto al exterior (vía [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)). Maneja sesiones, orquestación de requests y formateo de respuestas.
-> - **[gRPC](https://grpc.io/docs/)**: protocolo de comunicación **back-to-back** entre microservicios internos (BFF ↔ RAG Service, RAG ↔ Knowledge Base). No se usa para comunicación con el widget ni con el frontend. El widget siempre se comunica vía HTTPS con el BFF. gRPC se elige por su eficiencia ([Protocol Buffers](https://protobuf.dev/), streaming bidireccional, tipado fuerte) para el tráfico interno entre servicios dentro de la [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html).
+> **Nota sobre terminología:**
+> - **[API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)**: punto de entrada único para todo el tráfico. Valida [JWT](https://datatracker.ietf.org/doc/html/rfc7519) de forma nativa (Cognito o Auth Lambda), aplica rate limiting por usuario, y enruta al servicio correspondiente.
+> - **RAG Service**: servicio FastAPI que maneja tanto las consultas RAG como el [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) y la orquestación de respuestas. Es el único backend interno. Se comunica con [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) (pgvector), [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) y [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html).
+> - **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)**: la API de Knowledge Base y el Auth Handshake (Opción 1) se implementan como funciones Lambda serverless, ya que son operaciones esporádicas que no justifican un contenedor 24/7.
 
 #### 3.2.1 Servicios y Tecnologías
 
-| Servicio | Lenguaje | Framework | Protocolo | Puerto | Réplicas |
-|----------|----------|-----------|-----------|--------|----------|
-| **BFF** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) | HTTP/[SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) | 8080 | 2-3 |
-| **RAG Service** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) + [LlamaIndex](https://docs.llamaindex.ai/) | [gRPC](https://grpc.io/docs/) | 50051 | 2-3 |
-| **Knowledge Base** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) + [LangChain](https://python.langchain.com/docs/) | [gRPC](https://grpc.io/docs/) | 50052 | 1-2 |
-| **Analytics** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) | HTTP | 8083 | 1-2 |
+| Servicio | Lenguaje | Framework | Cómputo | Observaciones |
+|----------|----------|-----------|---------|---------------|
+| **RAG Service** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) + [LlamaIndex](https://docs.llamaindex.ai/) | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB | HTTP/[SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), 2 réplicas. Entrada directa desde [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). Orquestación + streaming + RAG |
+| **Auth Handshake Lambda** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB, 10s timeout | Solo Opción 1. Handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) + generación de [JWT](https://datatracker.ietf.org/doc/html/rfc7519). Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
+| **Knowledge Base (KB) API** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB, 30s timeout | CRUD de documentos + presigned URLs. Escala a 0, solo se paga por uso. Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
+| **Analytics** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 0.25 vCPU, 0.5 GB | HTTP, 1 réplica async, eventos vía [SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html) |
 
 #### 3.2.2 Comunicación entre Servicios
 
 | De | A | Protocolo | Autenticación | Propósito |
 |----|---|-----------|---------------|-----------|
 | [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | HTTPS (TLS 1.3) | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) | Solicitudes widget |
-| BFF | RAG | [gRPC](https://grpc.io/docs/) + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) | Certificado cliente | Consultas RAG |
-| BFF | Analytics | [SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html) | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Eventos async |
+| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [RAG Service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | HTTPS (HTTP/1.1) | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) validado (API Gateway) + VPC Link | Consultas chat + SSE streaming |
+| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [KB API Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | CRUD documentos + presigned URLs |
+| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Auth Handshake Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Handshake RSA Opción 1 |
+| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Analytics](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | HTTPS (HTTP/1.1) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Eventos async |
 | RAG | [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) | AWS SDK | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | InvokeModel |
-| RAG | [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) | PostgreSQL (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Queries [pgvector](https://github.com/pgvector/pgvector) |
+| RAG | [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) | PostgreSQL (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Queries [pgvector](https://github.com/pgvector/pgvector) |
 | RAG | [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) | Redis (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Cache |
 
 #### 3.2.3 Pipeline RAG (Detalle)
@@ -510,9 +509,10 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 |----------|-----|---------------|
 | **[Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** | Autenticación y autorización | 10K MAU gratis, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)/[OIDC](https://openid.net/specs/openid-connect-core-1_0.html), MFA, SSO |
 | **[API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)** | API entry point | $1/1M requests (vs $3.50 REST), [JWT](https://datatracker.ietf.org/doc/html/rfc7519) auth nativo |
-| **[ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)** | Orquestación de microservicios | Sin Kubernetes, ~$50-300/mes, auto-escalado |
-| **[Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html)** | Base de datos principal + vectores | [pgvector](https://github.com/pgvector/pgvector) gratis, datos relacionales + vectores en una DB |
-| **[Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html)** | LLM (Claude) + Embeddings (Titan) | Sin mínimo, pago por token, [Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html). ⚠️ Cognito NO controla gasto de Bedrock. Para limitar por asesor se implementa middleware en BFF que lleva conteo de tokens/usuario en [DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) y rechaza si excede su cupo. Las consultas que excedan el límite se facturan como excedente |
+| **[ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)** | Orquestación de microservicios (RAG, Analytics) | Sin Kubernetes, ~$50-250/mes, auto-escalado |
+| **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | KB API (CRUD documentos + presigned URLs) | Sin costo en reposo, solo se paga por ejecución. ~$0.50/mes para el volumen del proyecto |
+| **[RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector)** | Base de datos principal + vectores | [pgvector](https://github.com/pgvector/pgvector) gratis, datos relacionales + vectores en una DB |
+| **[Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html)** | LLM (Claude) + Embeddings (Titan) | Sin mínimo, pago por token, [Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html). ⚠️ Cognito NO controla gasto de Bedrock. Para limitar por asesor se implementa middleware en RAG Service que lleva conteo de tokens/usuario en [DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) y rechaza si excede su cupo. Las consultas que excedan el límite se facturan como excedente |
 | **[ElastiCache (Redis)](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html)** | Semantic cache, sesiones | Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%** |
 | **[S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html)** | Hosting widget estático | Transferencia S3→CF gratis, free tier 1TB/mes |
 | **[KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html)** | Cifrado de datos en reposo | $1/key/mes (~$3.450 COP), integración nativa |
@@ -534,24 +534,30 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 
 #### 3.3.2 Recursos y Dimensionamiento por Ambiente
 
-El sistema opera con **4 ambientes** a lo largo del proyecto. Los costos varían según la etapa:
+El sistema tiene un **stack único** que se replica en todos los ambientes (desarrollo, piloto y producción). La diferencia está en el dimensionamiento, no en la arquitectura. Esto garantiza que lo que funciona en desarrollo funciona igual en producción.
 
-| Ambiente | Propósito | Período | AWS Costo/mes |
-|----------|-----------|---------|---------------|
-| **Desarrollo/QA** | Pruebas internas, demos al cliente, sprints | Meses 1-4 | ~$100-150/mes |
-| **Piloto** | 5-10 asesores reales en producción | Meses 5-6 (~2 meses) | ~$250-400/mes (se elimina al terminar el piloto) |
-| **Producción** | 100 asesores | Desde mes 7 | ~$525-650/mes |
-| **Masificación** | 500+ asesores | Desde mes 11-12 | ~$1.300-1.600/mes |
+| Ambiente | Propósito | Apagado nocturno | Período |
+|----------|-----------|------------------|---------|
+| **Desarrollo** | Dev, pruebas, demos, sprints | ✅ ECS y RDS apagados 12h/día (noche y findes). Se enciende bajo demanda vía script o schedule | Meses 1-4 (luego se mantiene) |
+| **Piloto** | 5-10 asesores reales | ❌ 24/7. Si el horario de uso lo permite, se puede apagar en franjas sin actividad | Meses 5-6 (~2 meses) |
+| **Producción** | 100+ asesores | ❌ 24/7 | Desde mes 7 |
+| **Escalado** | 500+ asesores | ❌ 24/7 | Desde mes 11-12 |
 
-| Microservicio | CPU | RAM | Réplicas | Storage | Costo/mes (USD) | Costo/mes (COP) |
-|--------------|-----|-----|----------|---------|-----------------|------------------|
-| BFF | 0.5 vCPU | 1 GB | 2 | — | ~$50 | ~$172.500 |
-| RAG Service | 1 vCPU | 2 GB | 2 | — | ~$80 | ~$276.000 |
-| Knowledge Base | 0.5 vCPU | 1 GB | 1 | — | ~$25 | ~$86.250 |
-| Analytics | 0.5 vCPU | 1 GB | 1 | — | ~$25 | ~$86.250 |
-| Aurora Serverless v2 | 2 ACU | — | 1 | 50 GB | ~$60 | ~$207.000 |
-| Redis | 1 GB | — | 1 | — | ~$20 | ~$69.000 |
-| **Total** | | | | | **~$260** | **~$897.000** |
+**Dimensionamiento base por servicio (aplica a todos los ambientes):**
+
+| Servicio | Cómputo | Réplicas | Dev (apagado 12h) | Prod/Piloto 24/7 |
+|----------|---------|----------|-------------------|-------------------|
+| **RAG Service** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB | 2 | ~$40/mes (12h) | ~$80/mes |
+| **Auth Handshake Lambda** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB | — | < $0.10/mes | < $0.10/mes |
+| **KB API** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB | — | < $1/mes | < $1/mes |
+| **Analytics** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 0.25 vCPU, 0.5 GB | 1 | ~$12/mes (12h) | ~$25/mes |
+| **RDS pgvector** | db.t4g.small, 50 GB gp3 | 1 | ~$14/mes (12h) | ~$28/mes |
+| **Redis** | ElastiCache Serverless 0.5 GB | 1 | — | ~$20/mes |
+| **Total servicios** | | | **~$67/mes** | **~$154/mes** |
+
+El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno).
+
+> **Nota:** Los costos de infraestructura adicional (VPC, NAT Gateway, WAF, Route53, CloudWatch Logs, Secrets Manager) suman ~$80-130/mes sin importar cuántos ambientes haya — ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados). Estos costos fijos se comparten entre ambientes cuando usan la misma VPC.
 
 ### 3.4 CI/CD — Pipeline de Despliegue Continuo
 
@@ -852,7 +858,7 @@ Utilizamos las capas de seguridad estándar de la industria que protegen bancos,
 | **Transporte** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) | Todo el tráfico viaja cifrado. TLS 1.3 reduce el handshake a 1-RTT (< 100ms) y elimina cifrados inseguros. [ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) gestiona los certificados automáticamente (gratis) |
 | **Autenticación** | [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [OIDC](https://openid.net/specs/openid-connect-core-1_0.html) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | Tokens de acceso de **15 minutos** de vida útil, refresh tokens rotativos. El token viaja en header `Authorization: Bearer` dentro del túnel TLS |
 | **Seguridad web** | [HSTS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security) + [CSP](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy) + CORS | HSTS forza HTTPS. CSP limita qué scripts pueden ejecutarse. CORS restringido al dominio del cliente |
-| **Service-to-service** | [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | Comunicación interna BFF ↔ RAG ↔ KB autenticada con certificados mutuos |
+| **Service-to-service** | [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre servicios | Comunicación interna RAG ↔ otros servicios autenticada con certificados mutuos. La KB API (Lambda) se comunica vía API Gateway (HTTPS + JWT) |
 | **Rate limiting** | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-throttling.html) por usuario | Límite de requests por asesor para evitar abusos |
 | **Datos en reposo** | [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) | Bases de datos y S3 cifrados con claves gestionadas por KMS, rotación automática anual |
 
@@ -914,7 +920,7 @@ Dado el riesgo legal del sector funerario (una respuesta errónea sobre cobertur
 | **System Prompt estricto** | Instrucción base del modelo | El prompt de sistema de Claude incluye explícitamente: *"Solo responde con información que exista en los documentos proporcionados. Si no encuentras la respuesta en los documentos, di 'No tengo esa información, consulta con auditoría'. No inventes precios, edades, coberturas ni condiciones. No asumas rangos no especificados."* |
 | **Validación de contexto** | Verificación post-generación | El RAG Service compara la respuesta generada con los chunks recuperados. Si la respuesta contiene información numérica (edades, precios, fechas) que no está en los chunks, fuerza una advertencia al asesor: *"Esta información no pudo ser verificada en los documentos. Consulta con auditoría antes de compartirla."* |
 | **Umbral de confianza en retrieval** | Mínimo de similitud para usar un chunk | Si el chunk recuperado tiene similitud < 0.75 con la consulta, se excluye del contexto. Si tras excluir los de baja confianza el contexto queda vacío, el asistente responde: *"No encontré información suficiente en los documentos cargados. Consulta con auditoría."* |
-| **Fallback por falta de contexto** | Respuesta segura por defecto | Si el pipeline completo no logra armar un contexto con al menos 2 chunks de confianza > 0.75, no se invoca al LLM. El BFF devuelve directamente el mensaje de "No tengo información suficiente" sin consumir Bedrock. |
+| **Fallback por falta de contexto** | Respuesta segura por defecto | Si el pipeline completo no logra armar un contexto con al menos 2 chunks de confianza > 0.75, no se invoca al LLM. El RAG Service devuelve directamente el mensaje de "No tengo información suficiente" sin consumir Bedrock. |
 
 > **Impacto en costos:** Las validaciones post-generación añaden latencia (~200ms) pero evitan respuestas erróneas con riesgo legal. El fallback por falta de contexto ahorra costos de Bedrock al no invocar al LLM cuando no hay información suficiente.
 
@@ -966,7 +972,7 @@ El ajuste se refleja automáticamente en la siguiente factura sin intervención 
 
 ### 6.1 Metodología
 
-El proyecto se desarrolla con **Scrum** adaptado a un equipo de 1 persona (desarrollador full-stack). Cada **sprint de 2 semanas** produce un incremento funcional desplegado en ambiente de pruebas (QA) para que el cliente vea el progreso y dé feedback.
+El proyecto se desarrolla con **Scrum** adaptado a un equipo de 1 persona (desarrollador full-stack). Cada **sprint de 2 semanas** produce un incremento funcional desplegado en ambiente de Desarrollo para que el cliente vea el progreso y dé feedback.
 
 | Rol | Quién |
 |-----|-------|
@@ -979,17 +985,17 @@ El proyecto se desarrolla con **Scrum** adaptado a un equipo de 1 persona (desar
 
 ### 6.2 Ambientes
 
-El proyecto contempla los siguientes ambientes a lo largo del ciclo de vida:
+Todos los ambientes usan el **mismo stack** (RAG + KB Lambda + Analytics + RDS + Redis). La diferencia está en el dimensionamiento y el schedule de apagado:
 
-| Ambiente | Propósito | Período | AWS Costo adicional/mes |
-|----------|-----------|---------|------------------------|
-| **QA/Staging** | Pruebas del cliente, demos, feedback | Durante todo el proyecto | ~$100-150/mes |
-| **Piloto** | 5-10 asesores reales | Temporal (~2 meses, sprints 6-7). Se elimina al terminar el piloto y validar resultados | ~$250-400/mes |
-| **Producción** | Asesores reales (100+) | Desde el sprint 8 en adelante | ~$625-750/mes |
+| Ambiente | Propósito | Apagado nocturno | Período |
+|----------|-----------|------------------|---------|
+| **Desarrollo** | Dev, pruebas, demos, sprints | ✅ ECS y RDS apagados en horario no laboral | Durante todo el proyecto |
+| **Piloto** | 5-10 asesores reales | ❌ 24/7 (o según horario del cliente) | Temporal (~2 meses, sprints 6-7) |
+| **Producción** | Asesores reales (100+) | ❌ 24/7 | Desde sprint 8 en adelante |
 
-> **Flujo:** Durante los sprints 1-5 solo existe QA. En los sprints 6-7 se agrega el ambiente de Piloto (QA + Piloto = ~$350-550/mes). Si el piloto es exitoso, se elimina el ambiente de piloto y se monta el ambiente de producción (QA + Producción = ~$725-900/mes). Si se requiere escalar a 500+ asesores, los costos aumentan a ~$1.440-1.560/mes.
+> **Flujo:** Durante los sprints 1-5 solo existe Desarrollo (apagado nocturno). En los sprints 6-7 se agrega el ambiente de Piloto (no se apaga). Si el piloto es exitoso, el ambiente de Piloto se convierte en Producción o se crea uno nuevo. Si se requiere escalar a 500+ asesores, se ajusta el dimensionamiento del ambiente de producción existente (escalamiento vertical, no horizontal — no se crea un ambiente nuevo).
 >
-> El ambiente QA usa servicios más pequeños (0.5 ACU Aurora, Fargate tareas spot, Redis pequeño).
+> **Apagado nocturno en Desarrollo:** Se implementa un script (AWS CLI + EventBridge) que apaga los ECS services y detiene la instancia RDS a las 8pm y los enciende a las 7am, de lunes a viernes. Los fines de semana permanece apagado. En desarrollo no se cobra por los servicios apagados — solo storage (RDS) y datos (S3). El ahorro es ~50% vs un ambiente 24/7.
 
 
 
@@ -1003,14 +1009,14 @@ gantt
 
     section Sprint 1-2: Fundacion
     Sprint 1 - Infraestructura + Auth     :s1, 2026-07-01, 14d
-    Sprint 2 - Widget base + BFF          :s2, after s1, 14d
+    Sprint 2 - Widget base + RAG setup    :s2, after s1, 14d
 
     section Sprint 3-4: Chat con IA
-    Sprint 3 - RAG simple + KB Admin v1   :s3, after s2, 14d
+    Sprint 3 - KB Admin v1 + RAG v1      :s3, after s2, 14d
     Sprint 4 - Chat funcional + Ingesta    :s4, after s3, 14d
 
     section Sprint 5-7: Piloto
-    Sprint 5 - Chat completo con cifrado   :s5, after s4, 14d
+    Sprint 5 - Chat completo + cifrado    :s5, after s4, 14d
     Sprint 6 - Piloto 5-10 asesores        :s6, after s5, 14d
     Sprint 7 - Ajustes post-piloto         :s7, after s6, 14d
 
@@ -1027,37 +1033,39 @@ gantt
 | Actividad | Entregable |
 |-----------|------------|
 | Setup cuenta AWS, [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html), [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html), Security Groups | Infraestructura base [Terraform](https://developer.hashicorp.com/terraform/docs) |
+| [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) + [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) + JWT Authorizer | Entry point con auth + rate limiting |
 | **Opción 2:** [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) User Pool, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749), [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) | Auth service funcional (solo si aplica) |
 | **Opción 2:** App SPA base con login | Host app con login integrado (solo si aplica) |
+| **Opción 1:** Auth Handshake Lambda + endpoint en [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) funcional (solo si aplica) |
 | Widget embebible recibe token desde host | Mecanismo de auth delegado funcional |
-| CI/CD: GitHub Actions + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | Pipeline de deploy a QA |
+| CI/CD: [GitHub Actions](https://docs.github.com/en/actions) + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | Pipeline de deploy a Desarrollo |
 | **Demo 1:** Widget cargado en host de prueba con token funcional | ✅ |
 
-#### Sprint 2: Widget base + BFF (semana 3-4)
+#### Sprint 2: Widget base + RAG Service setup (semana 3-4)
 
 | Actividad | Entregable |
 |-----------|------------|
 | Widget [Lit 3](https://lit.dev/docs/) con [Custom Element](https://developer.mozilla.org/en-US/docs/Web/API/Web_components), [Shadow DOM](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM) | Widget embebible ~20KB |
-| [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) + WAF | Seguridad funcional en QA |
-| BFF Service ([FastAPI](https://fastapi.tiangolo.com/)) con [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) | BFF desplegado en QA |
-| **Demo 2:** Widget cargado en host de prueba, login + API cifrada | ✅ |
+| RAG Service ([FastAPI](https://fastapi.tiangolo.com/)) con [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) + endpoint chat | RAG Service desplegado en Desarrollo |
+| API Gateway → RAG Service via VPC Link | Ruteo funcional con JWT validation |
+| **Demo 2:** Widget cargado en host de prueba, chat request responde desde RAG | ✅ |
 
 #### Sprint 3: RAG simple + KB Admin v1 (semana 5-6)
 
 | Actividad | Entregable |
 |-----------|------------|
-| [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) | Vector DB operativa en QA |
+| [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) | Vector DB operativa en Desarrollo |
 | Pipeline de ingesta: [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) → [pgvector](https://github.com/pgvector/pgvector) | Ingesta de documentos funcional |
-| KB Admin Panel v1 (subir documentos, ver estado) | Panel admin básico en QA |
+| KB Admin Panel v1 (subir documentos, ver estado) | Panel admin básico en Desarrollo |
 | **Demo 3:** Admin sube documento, se indexa en pgvector | ✅ |
 
 #### Sprint 4: Chat funcional + Ingesta (semana 7-8)
 
 | Actividad | Entregable |
 |-----------|------------|
-| RAG Service ([LlamaIndex](https://docs.llamaindex.ai/)): chunking, embedding, retrieval | RAG v1 en QA |
+| RAG Service ([LlamaIndex](https://docs.llamaindex.ai/)): chunking, embedding, retrieval | RAG v1 en Desarrollo |
 | [Claude Sonnet](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) en [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) + [prompt engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) | Chat funcional con IA |
-| Widget conectado a RAG via BFF | Asistente responde preguntas en QA |
+| Widget conectado a RAG via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Asistente responde preguntas en Desarrollo |
 | **Demo 4:** Asesor prueba el chat con documentos reales | ✅ |
 
 #### Sprint 5: Chat completo con cifrado (semana 9-10)
@@ -1068,7 +1076,7 @@ gantt
 | [SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) streaming cifrado | Respuestas en tiempo real cifradas |
 | PII stripping antes de LLM | Privacidad de datos operativa |
 | Refinamiento de prompts + calidad respuestas | Chat listo para piloto |
-| **Demo 5:** Todo el flujo cifrado: widget → API → BFF → RAG → [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) → respuesta | ✅ |
+| **Demo 5:** Todo el flujo cifrado: widget → API Gateway → RAG → [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) → respuesta SSE | ✅ |
 
 #### Sprint 6: Piloto 5-10 asesores (semana 11-12)
 
@@ -1148,35 +1156,27 @@ Después del Sprint 5 (MVP funcional en QA), se despliega a producción con 5-10
 
 Tasa de cambio: $1 USD = $3,450 COP
 
-#### MVP / Desarrollo (primeros 3 meses)
+#### Desarrollo (apagado nocturno — 12h/día, 5d/semana ~50% compute)
 
 | Servicio | Configuración | Costo/mes (USD) | Costo/mes (COP) |
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, < 10 MAU | $0.00 | $0 |
 | API Gateway HTTP | 10K requests/mes | $0.01 | ~$35 |
-| ECS Fargate | 1 servicio, 0.5 vCPU, 1 GB | ~$30 | ~$103.500 |
-| Aurora Serverless v2 | 0.5 ACU, 10 GB | ~$43 | ~$148.000 |
-| Bedrock (Claude Haiku) | 1K conversaciones/mes | ~$5 | ~$17.250 |
-| Titan Embeddings | 1K documentos | ~$0.02 | ~$69 |
-| ElastiCache (Redis) | Serverless, 0.5 GB | ~$10 | ~$34.500 |
-| S3 + CloudFront | 1 GB, 1K requests | ~$1 | ~$3.450 |
+| ECS Fargate | RAG + Analytics, apagados 12h/día | ~$52 | ~$179.400 |
+| [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD + presigned URLs. ~50 invocaciones/mes | ~$0.10 | ~$345 |
+| Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
+| RDS db.t4g.small | 50 GB gp3, apagado 12h/día (storage siempre activo) | ~$16 | ~$55.200 |
+| Bedrock (Claude Haiku) | 1K conversaciones/mes (pruebas) | ~$5 | ~$17.250 |
+| Titan Embeddings | 500 documentos | ~$0.01 | ~$35 |
+| ElastiCache (Redis) | Serverless, 0.5 GB (auto-pause cuando sin uso) | ~$10 | ~$34.500 |
+| S3 + CloudFront | 5 GB, 10K requests | ~$2 | ~$6.900 |
+| Step Functions | Pruebas de ingesta | ~$1 | ~$3.450 |
+| CloudWatch Logs | Logs de servicios + debugging | ~$10 | ~$34.500 |
 | KMS + ACM | 2 keys | ~$2 | ~$6.900 |
-| Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets | ~$60 | ~$207.000 |
-| **Total MVP** | | **~$151/mes** | **~$521.000/mes** |
+| Infraestructura adicional compartida | VPC, NAT, WAF, Route53, Secrets | ~$60 | ~$207.000 |
+| **Total Desarrollo** | | **~$158/mes** | **~$545.865/mes** |
 
-> *Durante MVP/desarrollo la mayoría de servicios de infra pueden ser mínimos o desactivados. El rango real es ~$91-151/mes.*
-
-#### QA / Staging (ambiente de pruebas — durante desarrollo y pilotos)
-
-| Servicio | Configuración | Costo/mes (USD) | Costo/mes (COP) |
-|----------|--------------|-----------------|------------------|
-| ECS Fargate | 1 servicio, 0.5 vCPU spot | ~$15 | ~$51.750 |
-| Aurora Serverless v2 | 0.5 ACU, 10 GB | ~$43 | ~$148.000 |
-| Bedrock (Claude Haiku) | 500 conversaciones/mes | ~$3 | ~$10.350 |
-| ElastiCache (Redis) | Serverless, 0.5 GB | ~$10 | ~$34.500 |
-| S3 + CloudFront | 5 GB, 10K requests | ~$3 | ~$10.350 |
-| Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets | ~$50 | ~$172.500 |
-| **Total QA** | | **~$124/mes** | **~$427.500/mes** |
+> **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, NAT, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente.
 
 #### Producción (100 asesores)
 
@@ -1184,7 +1184,9 @@ Tasa de cambio: $1 USD = $3,450 COP
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, 100 MAU | $0.00 | $0 |
 | API Gateway HTTP | 3M requests/mes (60K consultas × ~50 llamadas internas) | $3.00 | ~$10.350 |
-| ECS Fargate | 3 servicios, 3-5 réplicas (mayor concurrencia) | ~$350 | ~$1.207.000 |
+| ECS Fargate | RAG + Analytics, 2-4 réplicas | ~$145 | ~$500.250 |
+| [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~200 invocaciones/mes × 45s | ~$0.50 | ~$1.725 |
+| Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
 | Aurora Serverless v2 | 3 ACU, 50 GB (más conexiones concurrentes) | ~$80 | ~$276.000 |
 | Bedrock (Claude Sonnet + Haiku) | 60K conversaciones/mes (6× respecto a estimación anterior) | ~$600 | ~$2.070.000 |
 | Titan Embeddings | 10K documentos/mes | ~$0.20 | ~$690 |
@@ -1194,9 +1196,9 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch + X-Ray | Logs + trazas (6× más logs de Bedrock) | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$1.238/mes** | **~$4.271.150/mes** |
-| **+ QA (paralelo)** | | **~$124/mes** | **~$427.500/mes** |
-| **Total Prod + QA** | | **~$1.362/mes** | **~$4.698.650/mes** |
+| **Total Producción** | | **~$1.034/mes** | **~$3.567.215/mes** |
+
+> **Ahorro combinado en Producción (KB Lambda + eliminación BFF):** El KB en Lambda ahorra ~$24.50/mes vs un ECS 24/7. La eliminación del BFF (0.5 vCPU, 1 GB, 2 réplicas) ahorra ~$50/mes. Total: **~$74.50/mes USD** (~$257.025 COP/mes) por ambiente 24/7. En desarrollo el ahorro es ~$37/mes (apagado nocturno).
 
 #### Escalado (500+ asesores)
 
@@ -1204,7 +1206,8 @@ Tasa de cambio: $1 USD = $3,450 COP
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, 500-1000 MAU | ~$3 | ~$10.350 |
 | API Gateway HTTP | 15M requests/mes (300K consultas × ~50 llamadas internas) | $15.00 | ~$51.750 |
-| ECS Fargate | 4 servicios, 4-7 réplicas + Spot (mayor concurrencia) | ~$550 | ~$1.897.000 |
+| ECS Fargate | RAG + Analytics, 3-6 réplicas | ~$250 | ~$862.500 |
+| [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~500 invocaciones/mes × 45s | ~$1 | ~$3.450 |
 | Aurora Serverless v2 | 6 ACU, 100 GB HA | ~$200 | ~$690.000 |
 | Bedrock (Sonnet + Haiku routing) | 300K conversaciones/mes (6× respecto a estimación anterior) | ~$3.000 | ~$10.350.000 |
 | Titan Embeddings | 50K documentos/mes | ~$1 | ~$3.450 |
@@ -1214,20 +1217,18 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch + X-Ray | Logs + trazas (6× más logs) | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$4.174/mes** | **~$14.400.250/mes** |
-| **+ QA (paralelo)** | | **~$124/mes** | **~$427.500/mes** |
-| **Total Esc + QA** | | **~$4.298/mes** | **~$14.827.750/mes** |
+| **Total Escalado** | | **~$3.875/mes** | **~$13.368.750/mes** |
+| **Total Escalado** | | **~$3.875/mes** | **~$13.368.750/mes** |
 
 ### 7.2 Proyección Anual
 
-| Mes | Fase | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
-|-----|------|---------------------|---------------------|
-| 1-2 | Desarrollo + Fundación (sprints 1-2, solo QA) | ~$428.000/mes | ~$124/mes |
-| 3-4 | MVP parcial (sprints 3-4, QA + prod parcial) | ~$900.000/mes | ~$260/mes |
-| 5-6 | Piloto 5-10 asesores (sprints 5-6, QA + prod reducida) | ~$1.000.000/mes | ~$290/mes |
-| 7-10 | Producción 100 asesores (QA + prod) | ~$4.699.000/mes | ~$1.362/mes |
-| 11-12 | Escalamiento 200-500 (QA + prod) | ~$7.900.000/mes | ~$2.290/mes |
-| **Total Año 1** | **Proyección AWS** | **~$36.000.000-44.000.000/año** | **~$10.400-12.800/año** |
+| Mes | Fase | Ambientes activos | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
+|-----|------|-------------------|---------------------|---------------------|
+| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$546.000/mes | ~$158/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$810.000/mes | ~$235/mes |
+| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$4.113.000/mes | ~$1.192/mes |
+| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$4.169.000/mes | ~$1.208/mes |
+| **Total Año 1** | **Proyección AWS** | | **~$30.400.000-36.800.000/año** | **~$8.800-10.700/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1242,12 +1243,14 @@ Tasa de cambio: $1 USD = $3,450 COP
 |-----------|---------------------|---------------|
 | **Semantic Cache** (Redis) | **Optimista 68% / Normal 45% / Pesimista 25%** en costos LLM | Umbral similitud 0.92, ajustable. **⚠️ Riesgo para el sector funerario:** Una consulta sobre "planes para contratar" es muy distinta a "acabo de perder un ser querido". El caché puede devolver respuestas contextualmente inapropiadas si el umbral de similitud es muy bajo. Se recomienda: (a) umbral conservador (≥0.95), (b) desactivar el caché para consultas con tono emocional detectado, (c) monitorear manualmente durante el piloto |
 | **Routing inteligente** (Sonnet ↔ Haiku) | **Optimista 30% / Normal 18% / Pesimista 0%** (si se desactiva por calidad) | Tareas simples → Haiku, complejas → Sonnet |
-| **[Fargate Spot](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html)** | Hasta 70% en compute de QA/pre-prod | Dev/QA y servicios no críticos |
+| **Eliminación del BFF** | **~$50/mes (24/7) por ambiente** | API Gateway → RAG ECS directo. El RAG Service maneja SSE streaming y orquestación. Ahorro fijo, sin depender de patrones de uso |
+| **[API Gateway + JWT Authorizer](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html)** | **~$25/mes** vs tener un servicio ECS dedicado a auth | Auth delegada a API Gateway (JWT validation nativa). Opción 2 usa Cognito directo (PKCE), Opción 1 usa Lambda handshake (~$0.10/mes) |
 | **[Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html)** (1 año) | 30-50% en compute | Comprometerse a $50/mes (~$172.500 COP/mes) |
 | **[Batch Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)** | 50% en inferencia para procesamiento por lotes. Batch Bedrock permite enviar cientos de prompts en un archivo JSONL a [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html), [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) los procesa asincrónicamente (hasta 24h) a mitad de precio. Ideal para: ingestas nocturnas de documentos, generación de metadata, resúmenes automáticos de documentos, procesamiento de histórico de conversaciones | Procesamiento nocturno de documentos |
+| **[KB API en Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | **~$24/mes** (~$83.000 COP/mes) vs un servicio ECS 24/7 | Las operaciones del KB Admin (subir, listar, eliminar) son esporádicas. Lambda escala a 0 y solo cobra por uso. A ~200 operaciones/mes × ~45s, el costo es < $1/mes vs ~$25/mes de un ECS 0.5 vCPU 24/7 |
 | **[CloudFront free tier](https://aws.amazon.com/free/)** | 1TB/mes gratis | Aprovechar los primeros meses |
 | **[S3 Intelligent Tiering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html)** | Hasta 40% en storage | Datos de conversaciones con acceso variable |
-| **Escenarios de ahorro combinado total** | **Optimista: ~55% / Normal: ~35% / Pesimista: ~10%** sobre el costo total de infraestructura | **En números (prod 100 ases + QA):** base ~$4.7M COP/mes → Optimista ~$2.1M; Normal ~$3.1M; Pesimista ~$4.2M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores |
+| **Escenarios de ahorro combinado total** | **Optimista: ~60% / Normal: ~40% / Pesimista: ~15%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$3.6M COP/mes → Optimista ~$1.4M; Normal ~$2.2M; Pesimista ~$3.0M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF y el reemplazo de servicios ECS por Lambda (KB API) reducen la base estructural de costos |
 
 ---
 
@@ -1265,11 +1268,11 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 |-----------|:------------------------:|:--------------------------:|
 | Frontend (Widget Lit 3) | ✅ Desarrollo completo | ✅ Desarrollo completo |
 | App anfitriona SPA con login | ❌ A cargo del cliente | ✅ Desarrollo completo |
-| Backend (BFF, RAG, KB, Analytics) | ✅ Desarrollo completo | ✅ Desarrollo completo |
+| Backend (RAG, KB Lambda, Analytics) | ✅ Desarrollo completo | ✅ Desarrollo completo |
 | Infraestructura AWS | ❌ A cargo del cliente (cuenta AWS) | ❌ A cargo del cliente (cuenta AWS) |
 | CI/CD (GitHub Actions) | ✅ Pipeline completo | ✅ Pipeline completo |
 | Autenticación ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749)) | ❌ El cliente usa su propio auth | ✅ Configuración completa |
-| Widget + BFF + RAG integrados | ✅ End-to-end | ✅ End-to-end |
+| Widget + RAG integrados | ✅ End-to-end | ✅ End-to-end |
 | Piloto con 5-10 asesores | ✅ Acompañamiento 2 semanas | ✅ Acompañamiento 2 semanas |
 | Documentación técnica | ✅ | ✅ |
 | Capacitación equipo cliente | ✅ 2 sesiones de 2 horas c/u | ✅ 2 sesiones de 2 horas c/u |
@@ -1305,7 +1308,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 > - Sistema RAG corporativo en Colombia: $25M - $70M COP (Gulupa Digital)
 > - Agente autónomo con integraciones: $17M - $52M COP (Consolidación Digital)
 > - Agente IA avanzado: $7M - $15M+ COP (JortegaWD)
-> - Nuestro precio para un **sistema completo** (widget + 4 microservicios + KB Admin + CI/CD + pipeline de evaluación) está dentro del rango de mercado y representa un ahorro significativo vs contratar los 4 roles técnicos por separado.
+> - Nuestro precio para un **sistema completo** (widget + 3 microservicios + KB Lambda + KB Admin + CI/CD + pipeline de evaluación) está dentro del rango de mercado y representa un ahorro significativo vs contratar los 4 roles técnicos por separado.
 
 #### 8.1.3 Flujo de Pagos Sugerido
 
@@ -1341,13 +1344,13 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | Mes | Concepto | Opción 1<br/>Widget solo<br/>y Opción 2<br/>App completa (COP) | Notas |
 |-----|----------|:----------------------------------------------------------:|-------|
 | **Mes 0** | Setup + primera mensualidad | **$15.000.000** (Op. 1) / **$18.500.000** (Op. 2) | La diferencia en setup (~$3.5M) es por desarrollar la app anfitriona + [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) en Op. 2 |
-| **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | Infraestructura QA operativa, primeras demos |
+| **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | Infraestructura Desarrollo operativa, primeras demos |
 | **Mes 2** | Mensualidad | **$4.500.000** | Desarrollo continúa (sprints 3-4) |
-| **Mes 3** | Mensualidad | **$4.500.000** | Sprint 5: MVP funcional en QA |
+| **Mes 3** | Mensualidad | **$4.500.000** | Sprint 5: MVP funcional en Desarrollo |
 | **Mes 4** | Mensualidad | **$4.500.000** | Sprint 6: Piloto 5-10 asesores |
 | **Mes 5-12** | Mensualidad | **$5.500.000/mes** | Operación continua + mejoras |
 
-> **Mensualidad reducida durante desarrollo:** Durante los meses 2-4 no hay asesores reales consumiendo recursos de producción — solo infraestructura QA (~$428K-$1M/mes vs $4.7M/mes en producción). Ofrecemos una mensualidad reducida de **$4.500.000/mes** para los meses 2-4. A partir del mes 5 (producción real) aplica la mensualidad completa de $5.500.000. Esto reduce el año 1 en ~$9M.
+> **Mensualidad reducida durante desarrollo:** Durante los meses 2-4 no hay asesores reales consumiendo recursos de producción — solo infraestructura Desarrollo (~$158K/mes vs ~$1M/mes en producción). Ofrecemos una mensualidad reducida de **$4.500.000/mes** para los meses 2-4. A partir del mes 5 (producción real) aplica la mensualidad completa de $5.500.000. Esto reduce el año 1 en ~$9M.
 | **Total Año 1 (Op. 1)** | | **$15.000.000 + (3 × $4.500.000) + (8 × $5.500.000) = $72.500.000** | Setup + mensualidades |
 | **Total Año 1 (Op. 2)** | | **$18.500.000 + (3 × $4.500.000) + (8 × $5.500.000) = $76.000.000** | Setup + mensualidades |
 
@@ -1388,12 +1391,12 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | **Premium** | Hasta 300.000 | **$10.000.000 - $12.000.000** | ~$7M - $10M | Escalado, ~500 asesores |
 | **Ilimitado** | Sin límite | **$15.000.000 - $18.000.000** | ~$10M - $15M | Gran volumen |
 
-> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción), mantenimiento de microservicios, soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.9), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
+> **¿Qué incluye la mensualidad?** Infraestructura AWS (producción), mantenimiento de servicios (ECS + Lambda), soporte técnico en **horario laboral L-V 8am-6pm** (soporte fuera de este horario tiene costo adicional de $120.000 COP/hr, ver sección 8.2.9), actualizaciones de seguridad, monitoreo 24/7, backups diarios, SSL/TLS, dominio CDN, reportes mensuales de uso, **KB Admin Panel**, pipeline de ingesta de documentos.
 
 #### 8.2.6 Desglose de Costos del Plan Estándar
 
 > **Notas:**
-> - **Ambiente QA no incluido:** El ambiente de pruebas y staging es **costo interno del proveedor** — no se traslada al cliente. El cliente paga exclusivamente por la infraestructura de producción que sus asesores utilizan.
+> - **Ambiente de Desarrollo no incluido:** El ambiente de desarrollo y pruebas es **costo interno del proveedor** — no se traslada al cliente. El cliente paga exclusivamente por la infraestructura de producción que sus asesores utilizan.
 > - **Pipeline de evaluación incluido:** El sistema de evaluación continua (RAGAS + DeepEval) es parte de nuestro control de calidad y está incluido en la mensualidad sin costo adicional para el cliente.
 > - **Costo AWS con buffer:** Incluye un **buffer de ~15%** sobre el costo estimado de infraestructura AWS para cubrir fluctuaciones en consumo de asesores, variación cambiaria USD/COP, o picos inesperados en Bedrock. Si el costo real es menor, el ahorro se traslada al mes siguiente. Si es mayor, el buffer lo absorbe.
 > - **Precio unificado:** No hay diferencia de mensualidad entre Opción 1 y 2. La única diferencia está en el setup inicial.
@@ -1409,12 +1412,12 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 > **¿Qué incluyen los honorarios de gestión técnica?**
 > - **Soporte en horario laboral (L-V 8am-6pm):** Resolución de dudas, bugs, y solicitudes del equipo de Capillas. Sin límite de horas. Fuera de este horario aplica cargo extra ($120.000/hr, ver sección 8.2.9).
 > - **Mantenimiento post-estabilización:** Esfuerzo estimado de ~6-10 hrs/mes para correcciones, mejoras menores, y ajustes que surjan con el uso real.
-> - **Monitoreo 24/7 automatizado:** Alertas de disponibilidad, errores, y degradación en los 4 microservicios (BFF, RAG, KB, Analytics). No se monitorea manualmente — el sistema alerta cuando algo pasa y nosotros respondemos.
+> - **Monitoreo 24/7 automatizado:** Alertas de disponibilidad, errores, y degradación en los servicios (RAG, Analytics) y la Lambda KB. No se monitorea manualmente — el sistema alerta cuando algo pasa y nosotros respondemos.
 > - **Actualizaciones de seguridad:** Dependencias (npm, pip), parches críticos de contenedores, renovación de certificados SSL. Se aplican a medida que los proveedores liberan parches, no en releases mensuales fijos.
 > - **Gestión de KB Admin:** Procesamiento de los documentos que el cliente sube a la plataforma — chunking, embedding, y carga a pgvector. Hasta 100 documentos/mes.
 > - **Utilidad incluida:** Todo lo anterior incluye nuestro margen. No hay cargos ocultos ni markup sobre AWS.
 >
-> El precio del plan Estándar ($5.500.000) asume escenario de optimización Normal sobre costos de infraestructura AWS y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). El ambiente QA, el pipeline de evaluación de modelo y las herramientas de monitoreo son costos internos del proveedor. Si durante el piloto los optimizadores resultaran inaplicables, el precio se ajusta en la renovación.
+> El precio del plan Estándar ($5.500.000) asume escenario de optimización Normal sobre costos de infraestructura AWS y hasta **100 documentos/mes** procesados (1 documento = 1 archivo, sin importar páginas o peso). El ambiente de desarrollo, el pipeline de evaluación de modelo y las herramientas de monitoreo son costos internos del proveedor. Si durante el piloto los optimizadores resultaran inaplicables, el precio se ajusta en la renovación.
 
 
 
@@ -1428,9 +1431,9 @@ Para referencia, estos son los precios de mercado de soluciones comparables en C
 | **Agentik** | Agente IA Colombia | $749.000/mes | WhatsApp, 1.000 conv/mes, bot simple |
 | **Mentora** | Agente IA + integraciones | Desde $190.000/mes (mantenimiento) | Implementación desde $4.890.000 |
 | **Gulupa Digital** | Sistema RAG corporativo | $3-10M infra + $2-6M mantenimiento | Solo RAG, sin widget ni KB Admin |
-| **Nuestra propuesta** | RAG + widget + KB + BFF + 60K conv/mes | **$5.500.000** | **Full custom, 100 asesores, pipeline evaluación** |
+| **Nuestra propuesta** | RAG + widget + KB + 60K conv/mes | **$5.500.000** | **Full custom, 100 asesores, pipeline evaluación** |
 
-> Nuestra solución es la única que combina: widget embebible custom, 4 microservicios, KB Admin, pipeline de evaluación continua y soporte gestionado — todo por un precio competitivo frente a soluciones parciales del mercado.
+> Nuestra solución es la única que combina: widget embebible custom, 3 microservicios + Lambda, KB Admin, pipeline de evaluación continua y soporte gestionado — todo por un precio competitivo frente a soluciones parciales del mercado.
 
 #### 8.2.8 Mecanismo de Ajuste Cambiario (TRM)
 
@@ -1505,10 +1508,10 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 | Sprint | Semana | Demo para el cliente | Pago |
 |--------|--------|---------------------|------|
 | **Setup** | 0 | — | **$15.000.000** (Op. 1) / **$18.500.000** (Op. 2)<br/>Mes 0 |
-| Sprint 1 | 1-2 | Infraestructura + Auth funcional en QA | — |
-| Sprint 2 | 3-4 | Widget + BFF + cifrado en QA | **$7.500.000**<br/>Mes 2 |
-| Sprint 3 | 5-6 | KB Admin v1 + RAG simple en QA | — |
-| Sprint 4 | 7-8 | Chat funcional con IA en QA | **$7.500.000**<br/>Mes 3 |
+| Sprint 1 | 1-2 | Infraestructura + Auth funcional en Desarrollo | — |
+| Sprint 2 | 3-4 | Widget + RAG base en Desarrollo | **$7.500.000**<br/>Mes 2 |
+| Sprint 3 | 5-6 | KB Admin v1 + RAG simple en Desarrollo | — |
+| Sprint 4 | 7-8 | Chat funcional con IA en Desarrollo | **$7.500.000**<br/>Mes 3 |
 | Sprint 5 | 9-10 | Chat completo cifrado + PII | — |
 | Sprint 6 | 11-12 | **Piloto en producción (5-10 asesores)** | **$7.500.000**<br/>Mes 4 |
 | Sprint 7 | 13-14 | Ajustes post-piloto | — |

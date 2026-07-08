@@ -36,7 +36,7 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [OIDC](https://openid.net/specs/openid-connect-core-1_0.html) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) | 10K MAU gratis, MFA, SSO SAML/OIDC |
 | **Backend** | [FastAPI](https://fastapi.tiangolo.com/) (Python 3.12) + [gRPC](https://grpc.io/docs/) | Async nativo, [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), tipado fuerte |
 | **RAG Orchestration** | [LlamaIndex](https://docs.llamaindex.ai/) (retrieval) + [LangChain](https://python.langchain.com/docs/) (agentes) | Mejor RAG out-of-box + agentes complejos |
-| **Vector Database** | [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) | Escala a 0 ACU con [auto-pause (MinCapacity=0)](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html) (desde nov 2024). Cuando está en pausa solo se paga storage (~$0.10/GB-mes). Sin auto-pause el mínimo real es 0.5 ACU (~1 GB RAM). Resume ~15s. (~$43-60/mes idle), SQL + vectores. No usar con [RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/rds-proxy.html) ni [Global Database](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database.html) si se quiere auto-pause. |
+| **Vector Database** | [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector) | db.t4g.small — $28/mes 24/7 ($14/mes apagado nocturno). SQL + vectores en una DB, sin costo extra de licencia |
 | **Embeddings** | [text-embedding-3-small](https://platform.openai.com/docs/guides/embeddings) (512d MRL) | ~$69 COP/1M tokens, 1,536 dims configurables |
 | **LLM Principal** | [Claude Sonnet 4.6](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$10.350/$51.750 COP por MTok, 200K contexto |
 | **LLM Económico** | [Claude Haiku 4.5](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$3.450/$17.250 COP por MTok, tareas simples alto volumen |
@@ -54,8 +54,8 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 |-------|-----------------|------------------|----------|-------------|
 | **Desarrollo** | ~$146/mes | ~$504.000 | < 10 asesores | 1 ECS (RAG) + Lambda (KB + Auth), apagado nocturno |
 | **Piloto (5-10 asesores)** | ~$220/mes | ~$759.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
-| **Producción (100 asesores)** | ~$969/mes | ~$3.342.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
-| **Escalado (500+ asesores)** | ~$3.840/mes | ~$13.249.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
+| **Producción (100 asesores)** | ~$917/mes | ~$3.163.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
+| **Escalado (500+ asesores)** | ~$3.752/mes | ~$12.944.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
 
 ---
 
@@ -88,7 +88,7 @@ graph TB
         AUTH_LAMBDA[Auth Handshake Lambda<br/>Solo en Opción 1]
         RAG[RAG Service FastAPI<br/>SSE streaming + LlamaIndex]
         LAMBDA_KB[KB API Lambda<br/>CRUD docs + presigned URLs]
-        AURORA[Aurora pgvector]
+        RDS[(RDS PostgreSQL<br/>+ pgvector)]
         REDIS[Redis Cache]
         BEDROCK[Bedrock Claude]
         KMS[AWS KMS]
@@ -108,11 +108,11 @@ graph TB
     GW -->|KB operations| LAMBDA_KB
     GW -->|"Auth handshake (Opción 1)"| AUTH_LAMBDA
     LAMBDA_KB -->|Presigned URL → subida directa| S3
-    LAMBDA_KB -->|CRUD metadata| AURORA
-    RAG -->|pgvector| AURORA
+    LAMBDA_KB -->|CRUD metadata| RDS
+    RAG -->|pgvector| RDS
     RAG -->|Cache| REDIS
     RAG -->|Bedrock API| BEDROCK
-    KMS -.->|Encripta| AURORA
+    KMS -.->|Encripta| RDS
     KMS -.->|Encripta| REDIS
     S3 -->|Evento de subida| STEP
     STEP -->|Procesa y embebe| RAG
@@ -126,7 +126,7 @@ sequenceDiagram
     participant W as Widget
     participant GW as API Gateway
     participant R as RAG Service
-    participant V as Aurora pgvector
+    participant V as RDS pgvector
     participant C as Redis Cache
     participant L as Bedrock Claude
 
@@ -382,7 +382,7 @@ El pipeline RAG tiene dos flujos:
 **Ingesta (offline/batch):** Los documentos pasan por [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html):
 1. **Conversión a Markdown**: PDF y DOCX se transforman a Markdown (tablas, listas, títulos). TXT y MD se mantienen. El original se conserva intacto en S3.
 2. **Chunking semántico**: El Markdown se divide en fragmentos respetando la estructura (no se rompen tablas ni secciones).
-3. **Embeddings**: Se generan vectores con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html) y se almacenan en [Aurora](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) [pgvector](https://github.com/pgvector/pgvector) con índice [HNSW](https://github.com/pgvector/pgvector?tab=readme-ov-file#hnsw).
+3. **Embeddings**: Se generan vectores con [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html) y se almacenan en [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) [pgvector](https://github.com/pgvector/pgvector) con índice [HNSW](https://github.com/pgvector/pgvector?tab=readme-ov-file#hnsw).
 4. **Metadatos**: Cada chunk almacena el nombre del documento original, su versión, categoría y fecha de ingesta para poder citar la fuente en las respuestas.
 
 > **Costo del procesamiento de documentos:** El embedding de documentos es muy económico — [Titan Embeddings V2](https://docs.aws.amazon.com/bedrock/latest/userguide/titan-embedding-models.html) cuesta ~$0.00002/1K tokens. Un documento de 10 páginas (~30K tokens) cuesta ~$0.0006 (~$2 COP) en embeddings. Incluso con ciclos de prueba (subir → eliminar → re-subir), el costo es marginal. El procesamiento (Markdown, chunking) se ejecuta en [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) y [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) — también de costo despreciable (~$0.001 por documento). El plan Estándar incluye procesamiento de hasta **100 documentos/mes** (nuevos o actualizaciones) dentro de la mensualidad. Excesos se facturan a $5.000 COP por documento adicional.
@@ -551,7 +551,7 @@ El sistema tiene un **stack único** que se replica en todos los ambientes (desa
 | **Redis** | ElastiCache Serverless 0.5 GB | 1 | — | ~$20/mes |
 | **Total servicios** | | | **~$55/mes** | **~$129/mes** |
 
-El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno). También se eliminó el Analytics ECS (0.25 vCPU, 0.5 GB) — ~$25/mes por ambiente 24/7 (~$12/mes en desarrollo). Toda la observabilidad se maneja con CloudWatch nativo.
+El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno). También se eliminó el Analytics ECS (0.25 vCPU, 0.5 GB) — ~$25/mes por ambiente 24/7 (~$12/mes en desarrollo). El cambio de Aurora Serverless v2 a RDS db.t4g.small ahorra ~$52/mes en producción 24/7 (~$14/mes en desarrollo nocturno). Toda la observabilidad se maneja con CloudWatch nativo.
 
 > **Nota:** Los costos de infraestructura adicional (VPC, NAT Gateway, WAF, Route53, CloudWatch Logs, Secrets Manager) suman ~$80-130/mes sin importar cuántos ambientes haya — ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados). Estos costos fijos se comparten entre ambientes cuando usan la misma VPC.
 
@@ -695,7 +695,7 @@ El sistema opera en dos modalidades:
 
 #### 4.1.4 Vector Database
 
-| Aspecto | Aurora pgvector | Azure AI Search | GCP AlloyDB pgvector |
+| Aspecto | RDS pgvector | Azure AI Search | GCP AlloyDB pgvector |
 |---------|----------------|-----------------|----------------------|
 | **Costo mínimo (USD)** | ~$43/mes | $73/mes (Basic) | ~$200-400/mes |
 | **Costo mínimo (COP)** | ~$148.000/mes | ~$252.000/mes | ~$690.000-1.380.000/mes |
@@ -708,7 +708,7 @@ El sistema opera en dos modalidades:
 | **Costo idle (USD)** | ~$43/mes (~$148.000 COP) | $73/mes (~$252.000 COP) | ~$200/mes (~$690.000 COP) (AlloyDB min) |
 | **Valoración** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |
 
-**Recomendación: [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector)** — 90% más barato que OpenSearch Classic y Azure AI Search, escala a 0, misma DB para datos operacionales y vectores.
+**Recomendación: [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector)** — Más barato que Aurora Serverless, OpenSearch, Azure AI Search y AlloyDB. Misma DB para datos operacionales y vectores. En desarrollo se apaga 12h/día para ahorrar ~50%.
 
 #### 4.1.5 LLM / Modelos
 
@@ -775,7 +775,7 @@ El sistema opera en dos modalidades:
 #### 4.2.1 Razones Principales
 
 1. **Costo más bajo en todos los componentes críticos:**
-   - [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector): ~$148.000-241.500 COP/mes vs ~$252.000-845.000 COP de Azure AI Search vs ~$690.000-1.380.000 COP de GCP AlloyDB
+   - [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector): ~$55.000 COP/mes 24/7 (~$28/mes USD) vs ~$148.000-241.500 COP de Aurora Serverless vs ~$252.000-845.000 COP de Azure AI Search vs ~$690.000-1.380.000 COP de GCP AlloyDB
    - [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) sin cluster fee ($0) vs AKS (~$73/mes ≈ $252.000 COP) vs GKE (~$73/mes ≈ $252.000 COP)
    - [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) a ~$3.450 COP/1M requests vs competencia
    - [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) con free tier de 1TB/mes
@@ -793,7 +793,7 @@ El sistema opera en dos modalidades:
 
 4. **Operación sin equipo DevOps dedicado:**
    - [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) no requiere expertise en Kubernetes
-   - [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) escala a 0 sin gestión
+   - [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) se apaga en desarrollo 12h/día vía script (ahorro ~50% en compute)
    - [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) es gestionado
    - [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) es serverless
 
@@ -813,7 +813,7 @@ El sistema opera en dos modalidades:
 | Cognito Essentials | $0 (10K MAU gratis) | $0 | [aws.amazon.com/cognito/pricing](https://aws.amazon.com/cognito/pricing/) |
 | API Gateway HTTP | $1.00/1M requests | ~$3.450 COP | [aws.amazon.com/api-gateway/pricing](https://aws.amazon.com/api-gateway/pricing/) |
 | ECS Fargate | $0.04048/vCPU-hr + $0.004445/GB-hr | ~$140 + ~$15 COP | [aws.amazon.com/ecs/pricing](https://aws.amazon.com/ecs/pricing/) |
-| Aurora Serverless v2 | $0.12/ACU-hr, storage $0.10/GB-mes | ~$414 COP/ACU-hr, ~$345 COP/GB-mes | [aws.amazon.com/rds/aurora/pricing](https://aws.amazon.com/rds/aurora/pricing/) |
+| RDS db.t4g.small | $0.017/hr + storage $0.08/GB-mes gp3 | ~$59 COP/hr, ~$276 COP/GB-mes | [aws.amazon.com/rds/pricing](https://aws.amazon.com/rds/pricing/) |
 | Bedrock Claude Sonnet 4.6 | $3.00/MTok input, $15.00/MTok output | ~$10.350/ $51.750 COP | [aws.amazon.com/bedrock/pricing](https://aws.amazon.com/bedrock/pricing/) |
 | Bedrock Claude Haiku 4.5 | $1.00/MTok input, $5.00/MTok output | ~$3.450/ $17.250 COP | [aws.amazon.com/bedrock/pricing](https://aws.amazon.com/bedrock/pricing/) |
 | Titan Embeddings V2 | $0.00002/1K tokens (~$0.02/1M tokens) | ~$69 COP/1M tokens | [aws.amazon.com/bedrock/pricing](https://aws.amazon.com/bedrock/pricing/) |
@@ -840,7 +840,7 @@ El sistema opera en dos modalidades:
 | **API abuse** | Rate limiting + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) validation + [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) (100 req/min/asesor) |
 | **Injection (prompt)** | Separación system/user prompt + input sanitization | [Prompt engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) estructurado |
 | **Key compromise** | [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) + rotación automática | Rotación cada 30 días |
-| **Data at rest** | [KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) encryption en todos los servicios | Aurora, S3, Redis con KMS |
+| **Data at rest** | [KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) encryption en todos los servicios | RDS, S3, Redis con KMS |
 | **Payload interception** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) cifra todo el canal — el payload viaja protegido de extremo a extremo | Canal HTTPS estándar con certificados [ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) |
 
 ### 5.2 Seguridad en el Tránsito — TLS 1.3 + Buenas Prácticas
@@ -1050,7 +1050,7 @@ gantt
 
 | Actividad | Entregable |
 |-----------|------------|
-| [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html) + [pgvector](https://github.com/pgvector/pgvector) | Vector DB operativa en Desarrollo |
+| [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector) | Vector DB operativa en Desarrollo |
 | Pipeline de ingesta: [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) → [Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html) → [pgvector](https://github.com/pgvector/pgvector) | Ingesta de documentos funcional |
 | KB Admin Panel v1 (subir documentos, ver estado) | Panel admin básico en Desarrollo |
 | **Demo 3:** Admin sube documento, se indexa en pgvector | ✅ |
@@ -1183,7 +1183,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ECS Fargate | RAG, 2-4 réplicas | ~$80 | ~$276.000 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~200 invocaciones/mes × 45s | ~$0.50 | ~$1.725 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
-| Aurora Serverless v2 | 3 ACU, 50 GB (más conexiones concurrentes) | ~$80 | ~$276.000 |
+| RDS db.t4g.small | 50 GB gp3, 24/7 | ~$28 | ~$96.600 |
 | Bedrock (Claude Sonnet + Haiku) | 60K conversaciones/mes (6× respecto a estimación anterior) | ~$600 | ~$2.070.000 |
 | Titan Embeddings | 10K documentos/mes | ~$0.20 | ~$690 |
 | ElastiCache (Redis) | Serverless, 2 GB (más volumen de caché) | ~$30 | ~$103.500 |
@@ -1192,9 +1192,9 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch + X-Ray + metric filters | Logs, métricas (latencia, errores), dashboards, alarmas | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$969/mes** | **~$3.342.215/mes** |
+| **Total Producción** | | **~$917/mes** | **~$3.162.815/mes** |
 
-> **Ahorro combinado en Producción (KB Lambda + eliminación BFF + eliminación Analytics):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. Total: **~$99.50/mes USD** (~$343.275 COP/mes) por ambiente 24/7.
+> **Ahorro combinado en Producción (KB Lambda + BFF + Analytics + RDS):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. RDS db.t4g.small en vez de Aurora ahorra ~$52/mes. Total: **~$151.50/mes USD** (~$522.675 COP/mes) por ambiente 24/7.
 
 #### Escalado (500+ asesores)
 
@@ -1204,7 +1204,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | API Gateway HTTP | 15M requests/mes (300K consultas × ~50 llamadas internas) | $15.00 | ~$51.750 |
 | ECS Fargate | RAG, 3-6 réplicas | ~$230 | ~$793.500 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~500 invocaciones/mes × 45s | ~$1 | ~$3.450 |
-| Aurora Serverless v2 | 6 ACU, 100 GB HA | ~$200 | ~$690.000 |
+| RDS db.t4g.large | 100 GB gp3, HA multi-AZ | ~$112 | ~$386.400 |
 | Bedrock (Sonnet + Haiku routing) | 300K conversaciones/mes (6× respecto a estimación anterior) | ~$3.000 | ~$10.350.000 |
 | Titan Embeddings | 50K documentos/mes | ~$1 | ~$3.450 |
 | ElastiCache (Redis) | Serverless, 10 GB (5× más volumen de caché) | ~$80 | ~$276.000 |
@@ -1213,8 +1213,8 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch + X-Ray + metric filters | Logs + métricas + dashboards + alarmas | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$3.840/mes** | **~$13.248.750/mes** |
-| **Total Escalado** | | **~$3.840/mes** | **~$13.248.750/mes** |
+| **Total Escalado** | | **~$3.752/mes** | **~$12.944.400/mes** |
+| **Total Escalado** | | **~$3.752/mes** | **~$12.944.400/mes** |
 
 ### 7.2 Proyección Anual
 
@@ -1222,9 +1222,9 @@ Tasa de cambio: $1 USD = $3,450 COP
 |-----|------|-------------------|---------------------|---------------------|
 | 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$504.000/mes | ~$146/mes |
 | 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$1.263.000/mes | ~$366/mes |
-| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.846.000/mes | ~$1.115/mes |
-| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$13.752.000/mes | ~$3.986/mes |
-| **Total Año 1** | **Proyección AWS** | | **~$47.000.000-52.000.000/año** | **~$13.700-15.100/año** |
+| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.667.000/mes | ~$1.063/mes |
+| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$13.448.000/mes | ~$3.898/mes |
+| **Total Año 1** | **Proyección AWS** | | **~$46.000.000-51.000.000/año** | **~$13.350-14.800/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1246,7 +1246,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | **[KB API en Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | **~$24/mes** (~$83.000 COP/mes) vs un servicio ECS 24/7 | Las operaciones del KB Admin (subir, listar, eliminar) son esporádicas. Lambda escala a 0 y solo cobra por uso. A ~200 operaciones/mes × ~45s, el costo es < $1/mes vs ~$25/mes de un ECS 0.5 vCPU 24/7 |
 | **[CloudFront free tier](https://aws.amazon.com/free/)** | 1TB/mes gratis | Aprovechar los primeros meses |
 | **[S3 Intelligent Tiering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html)** | Hasta 40% en storage | Datos de conversaciones con acceso variable |
-| **Escenarios de ahorro combinado total** | **Optimista: ~60% / Normal: ~40% / Pesimista: ~15%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$3.34M COP/mes → Optimista ~$1.3M; Normal ~$2.0M; Pesimista ~$2.8M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF, Analytics y el reemplazo de servicios ECS por Lambda (KB API) reducen la base estructural de costos |
+| **Escenarios de ahorro combinado total** | **Optimista: ~65% / Normal: ~45% / Pesimista: ~20%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$3.16M COP/mes → Optimista ~$1.1M; Normal ~$1.7M; Pesimista ~$2.5M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF, Analytics, uso de RDS en vez de Aurora y reemplazo de servicios ECS por Lambda (KB API) reducen la base estructural de costos |
 
 ---
 
@@ -1550,7 +1550,6 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 - Amazon Cognito Pricing: https://aws.amazon.com/cognito/pricing/
 - API Gateway Pricing: https://aws.amazon.com/api-gateway/pricing/
 - Amazon ECS Pricing: https://aws.amazon.com/ecs/pricing/
-- Amazon Aurora Pricing: https://aws.amazon.com/rds/aurora/pricing/
 - Amazon Bedrock Pricing: https://aws.amazon.com/bedrock/pricing/
 - Amazon CloudFront Pricing: https://aws.amazon.com/cloudfront/pricing/
 - Amazon S3 Pricing: https://aws.amazon.com/s3/pricing/

@@ -40,7 +40,7 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **Embeddings** | [text-embedding-3-small](https://platform.openai.com/docs/guides/embeddings) (512d MRL) | ~$69 COP/1M tokens, 1,536 dims configurables |
 | **LLM Principal** | [Claude Sonnet 4.6](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$10.350/$51.750 COP por MTok, 200K contexto |
 | **LLM Económico** | [Claude Haiku 4.5](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$3.450/$17.250 COP por MTok, tareas simples alto volumen |
-| **Caché** | [ElastiCache Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) + [Semantic Cache](https://python.langchain.com/docs/how_to/contextual_compression/) (propuesta sujeta a pruebas — el negocio funerario tiene respuestas muy sensibles al contexto: una consulta de "planes para contratar" es distinta a "acabo de perder un ser querido", lo que puede reducir el hit rate del caché semántico) | Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%**. Latencia <10ms en cache hit |
+| **Caché** | [pgvector](https://github.com/pgvector/pgvector) semantic cache en [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) (tabla `semantic_cache` con embedding + índice HNSW) | Cache semántico por similitud de vectores en vez de hash exacto. No requiere servicio adicional. Se limpia automáticamente al subir/actualizar documentos. Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%** |
 | **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes. KB API en Lambda (escala a 0) |
 | **Cifrado** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [ACM (TLS 1.3)](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) todo el canal + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | ACM gratuito, KMS ~$3.450/key/mes COP |
 | **Observabilidad** | [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) + [X-Ray](https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html) | Logs, métricas (latencia, errores), alarmas y dashboards nativos AWS. Sin costos adicionales de herramientas externas |
@@ -52,10 +52,10 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 
 | Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
 |-------|-----------------|------------------|----------|-------------|
-| **Desarrollo** | ~$146/mes | ~$504.000 | < 10 asesores | 1 ECS (RAG) + Lambda (KB + Auth), apagado nocturno |
-| **Piloto (5-10 asesores)** | ~$220/mes | ~$759.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
-| **Producción (100 asesores)** | ~$917/mes | ~$3.163.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
-| **Escalado (500+ asesores)** | ~$3.752/mes | ~$12.944.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
+| **Desarrollo** | ~$136/mes | ~$470.000 | < 10 asesores | 1 ECS (RAG) + Lambda (KB + Auth), apagado nocturno |
+| **Piloto (5-10 asesores)** | ~$200/mes | ~$690.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
+| **Producción (100 asesores)** | ~$887/mes | ~$3.059.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
+| **Escalado (500+ asesores)** | ~$3.672/mes | ~$12.668.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
 
 ---
 
@@ -88,8 +88,7 @@ graph TB
         AUTH_LAMBDA[Auth Handshake Lambda<br/>Solo en Opción 1]
         RAG[RAG Service FastAPI<br/>SSE streaming + LlamaIndex]
         LAMBDA_KB[KB API Lambda<br/>CRUD docs + presigned URLs]
-        RDS[(RDS PostgreSQL<br/>+ pgvector)]
-        REDIS[Redis Cache]
+        RDS[(RDS PostgreSQL<br/>+ pgvector<br/>+ semantic cache)]
         BEDROCK[Bedrock Claude]
         KMS[AWS KMS]
         S3[(Amazon S3)]
@@ -110,10 +109,9 @@ graph TB
     LAMBDA_KB -->|Presigned URL → subida directa| S3
     LAMBDA_KB -->|CRUD metadata| RDS
     RAG -->|pgvector| RDS
-    RAG -->|Cache| REDIS
+    RAG -->|Cache semántico| RDS
     RAG -->|Bedrock API| BEDROCK
     KMS -.->|Encripta| RDS
-    KMS -.->|Encripta| REDIS
     S3 -->|Evento de subida| STEP
     STEP -->|Procesa y embebe| RAG
 ```
@@ -126,8 +124,7 @@ sequenceDiagram
     participant W as Widget
     participant GW as API Gateway
     participant R as RAG Service
-    participant V as RDS pgvector
-    participant C as Redis Cache
+    participant V as RDS pgvector<br/>+ semantic cache
     participant L as Bedrock Claude
 
     A->>W: Que plan para familia de 4?
@@ -136,23 +133,23 @@ sequenceDiagram
     GW->>GW: Valida JWT + rate limit
     GW->>R: HTTP /api/chat
     R->>R: Query Rewrite
-    R->>C: Cache Lookup
-    alt Cache HIT
-        C-->>R: Respuesta cacheada
+    R->>V: Cache Lookup (embedding query)
+    alt Cache HIT (similitud ≥0.95)
+        V-->>R: Respuesta cacheada
     else Cache MISS
         R->>V: Hybrid Search
         V-->>R: Top 20 chunks
         R->>R: Reranker top 5
         R->>L: Invoke Claude Sonnet
         L-->>R: Respuesta y fuentes
-        R->>C: Guardar en cache
+        R->>V: Guardar en cache (embedding + respuesta)
     end
     R-->>GW: SSE stream
     GW-->>W: SSE stream cifrado
     W-->>A: Plan Familiar Premium
 ```
 
-> **Nota:** "Cache HIT" significa que la respuesta ya estaba guardada en caché (se entrega inmediatamente sin costo de IA). "Cache MISS" significa que no estaba guardada y hay que calcularla completa.
+> **Nota:** "Cache HIT" significa que se encontró una respuesta semánticamente similar (umbral ≥0.95 por defecto) en la tabla `semantic_cache` de RDS y se entrega inmediatamente sin costo de IA. "Cache MISS" significa que no se encontró respuesta similar y hay que calcularla completa. El caché se limpia automáticamente al subir o actualizar documentos.
 
 ### 2.3 Flujo de Autenticación
 
@@ -349,7 +346,7 @@ Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/
 
 > **Nota sobre terminología:**
 > - **[API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)**: punto de entrada único para todo el tráfico. Valida [JWT](https://datatracker.ietf.org/doc/html/rfc7519) de forma nativa (Cognito o Auth Lambda), aplica rate limiting por usuario, y enruta al servicio correspondiente.
-> - **RAG Service**: servicio FastAPI que maneja tanto las consultas RAG como el [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) y la orquestación de respuestas. Es el único backend interno. Se comunica con [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) (pgvector), [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) y [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html).
+> - **RAG Service**: servicio FastAPI que maneja tanto las consultas RAG como el [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) y la orquestación de respuestas. Es el único backend interno. Se comunica con [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) (pgvector, incluyendo semantic cache) y [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html).
 > - **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)**: la API de Knowledge Base y el Auth Handshake (Opción 1) se implementan como funciones Lambda serverless, ya que son operaciones esporádicas que no justifican un contenedor 24/7.
 
 #### 3.2.1 Servicios y Tecnologías
@@ -371,8 +368,6 @@ Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Auth Handshake Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Handshake RSA Opción 1 |
 | RAG | [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) | AWS SDK | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | InvokeModel |
 | RAG | [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) | PostgreSQL (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Queries [pgvector](https://github.com/pgvector/pgvector) |
-| RAG | [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) | Redis (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Cache |
-
 #### 3.2.3 Pipeline RAG (Detalle)
 
 > **Requisito de documentos:** Los PDFs se suben en su formato original (incluso con tablas complejas) — el sistema los convierte automáticamente a Markdown preservando la estructura. No se requiere preparación previa. Los PDFs escaneados (imágenes) necesitan OCR ([AWS Textract](https://docs.aws.amazon.com/textract/latest/dg/what-is.html)), recomendamos digitalizar a texto nativo antes de la ingesta. Todos los formatos (PDF, DOCX, MD, TXT) se unifican internamente a Markdown para mejor comprensión del LLM.
@@ -391,7 +386,7 @@ El pipeline RAG tiene dos flujos:
 
 > **Versiones y reemplazo:** Cuando se sube una nueva versión del mismo documento, el pipeline: (a) marca los chunks antiguos como obsoletos, (b) indexa los nuevos, (c) elimina los antiguos atómicamente. El reemplazo es inmediato — no hay periodo de convivencia ni respuestas con información mezclada.
 
-**Consulta (online/tiempo real):** La consulta del asesor pasa por reescritura (corrección ortográfica y expansión), revisa el caché semántico en [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html), y si no encuentra respuesta (cache MISS) ejecuta [búsqueda híbrida (BM25)](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-match-bool-prefix-query.html) + vectores + filtros), reordenamiento con [cross-encoder](https://www.sbert.net/examples/applications/cross-encoder/README.html), expansión padre-hijo, ensamblaje de contexto, y finalmente invoca [Claude Sonnet](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) para generar la respuesta vía streaming.
+**Consulta (online/tiempo real):** La consulta del asesor pasa por reescritura (corrección ortográfica y expansión), convierte la consulta a embedding y busca en la tabla `semantic_cache` de RDS pgvector. Si encuentra una respuesta semánticamente similar (umbral ≥0.95), la devuelve sin ejecutar el pipeline RAG completo. Si no (cache MISS) ejecuta [búsqueda híbrida (BM25)](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-match-bool-prefix-query.html) + vectores + filtros), reordenamiento con [cross-encoder](https://www.sbert.net/examples/applications/cross-encoder/README.html), expansión padre-hijo, ensamblaje de contexto, y finalmente invoca [Claude Sonnet](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) para generar la respuesta vía streaming. Al finalizar, guarda el embedding de la consulta y la respuesta en el caché.
 
 > **Citación de fuentes (toggleable):** La respuesta del asistente puede incluir una nota al pie indicando de qué documento se obtuvo la información. Ej: "*Información obtenida del documento 'Plan Familiar Premium — Tarifas 2026' (subido el 15/03/2026)*". El administrador puede **activar o desactivar** esta funcionalidad desde el KB Admin Panel. Durante el piloto, se recomienda mantenerla activada para que los asesores verifiquen la fuente y reporten si un documento tiene información incorrecta — así se distingue entre un error del modelo y un error en el documento fuente.
 
@@ -510,7 +505,7 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 | **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | KB API (CRUD documentos + presigned URLs) | Sin costo en reposo, solo se paga por ejecución. ~$0.50/mes para el volumen del proyecto |
 | **[RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector)** | Base de datos principal + vectores | [pgvector](https://github.com/pgvector/pgvector) gratis, datos relacionales + vectores en una DB |
 | **[Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html)** | LLM (Claude) + Embeddings (Titan) | Sin mínimo, pago por token, [Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html). ⚠️ Cognito NO controla gasto de Bedrock. Para limitar por asesor se implementa middleware en RAG Service que lleva conteo de tokens/usuario en [DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) y rechaza si excede su cupo. Las consultas que excedan el límite se facturan como excedente |
-| **[ElastiCache (Redis)](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html)** | Semantic cache, sesiones | Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%** |
+| **RDS + pgvector** | Semantic cache en tabla propia con embedding + índice HNSW | Sin servicio adicional. Se limpia automáticamente al subir/actualizar documentos. Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%** |
 | **[S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html)** | Hosting widget estático | Transferencia S3→CF gratis, free tier 1TB/mes |
 | **[KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html)** | Cifrado de datos en reposo | $1/key/mes (~$3.450 COP), integración nativa |
 | **[ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)** | Certificados TLS/SSL | GRATIS, renovación automática |
@@ -547,9 +542,8 @@ El sistema tiene un **stack único** que se replica en todos los ambientes (desa
 | **RAG Service** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB | 2 | ~$40/mes (12h) | ~$80/mes |
 | **Auth Handshake Lambda** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB | — | < $0.10/mes | < $0.10/mes |
 | **KB API** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB | — | < $1/mes | < $1/mes |
-| **RDS pgvector** | db.t4g.small, 50 GB gp3 | 1 | ~$14/mes (12h) | ~$28/mes |
-| **Redis** | ElastiCache Serverless 0.5 GB | 1 | — | ~$20/mes |
-| **Total servicios** | | | **~$55/mes** | **~$129/mes** |
+| **RDS pgvector** | db.t4g.small, 50 GB gp3<br/>(incluye semantic cache) | 1 | ~$14/mes (12h) | ~$28/mes |
+| **Total servicios** | | | **~$55/mes** | **~$109/mes** |
 
 El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno). También se eliminó el Analytics ECS (0.25 vCPU, 0.5 GB) — ~$25/mes por ambiente 24/7 (~$12/mes en desarrollo). El cambio de Aurora Serverless v2 a RDS db.t4g.small ahorra ~$52/mes en producción 24/7 (~$14/mes en desarrollo nocturno). Toda la observabilidad se maneja con CloudWatch nativo.
 
@@ -756,7 +750,7 @@ El sistema opera en dos modalidades:
 | Hosting Widget | $0-15 | ~$0-51.750 | ~$25 | ~$86.250 | $10-30 | ~$34.500-103.500 |
 | Embeddings | $0-2 | ~$0-6.900 | $5-10 | ~$17.250-34.500 | $5-20 | ~$17.250-69.000 |
 | Storage convs | $50-150 | ~$172.500-517.500 | $25-50 | ~$86.250-172.500 | $10-30 | ~$34.500-103.500 |
-| Cache | ~$20 | ~$69.000 | ~$30 | ~$103.500 | ~$20 | ~$69.000 |
+| Cache | $0 (en RDS pgvector) | $0 | ~$30 | ~$103.500 | ~$20 | ~$69.000 |
 | Cifrado | $1-5 | ~$3.450-17.250 | ~$10 | ~$34.500 | $2-5 | ~$6.900-17.250 |
 | Infraestructura adicional | ~$80-130 | ~$276.000-448.500 | ~$80-130 | ~$276.000-448.500 | ~$80-130 | ~$276.000-448.500 |
 | **TOTAL/mes** | **~$280-930** | **~$966.000-3.208.500** | **~$880-1.530** | **~$3.036.000-5.278.500** | **~$480-1.130** | **~$1.656.000-3.898.500** |
@@ -821,7 +815,7 @@ El sistema opera en dos modalidades:
 | S3 Standard | $0.023/GB-mes | ~$79 COP/GB-mes | [aws.amazon.com/s3/pricing](https://aws.amazon.com/s3/pricing/) |
 | KMS | $1/key/mes + $0.03/10,000 requests | ~$3.450/key/mes + ~$104 COP | [aws.amazon.com/kms/pricing](https://aws.amazon.com/kms/pricing/) |
 | ACM | GRATIS | $0 | [aws.amazon.com/acm/pricing](https://aws.amazon.com/acm/pricing/) |
-| ElastiCache (Redis) | ~$0.034/GB-hr (serverless) | ~$117 COP/GB-hr | [aws.amazon.com/elasticache/pricing](https://aws.amazon.com/elasticache/pricing/) |
+
 
 ---
 
@@ -840,7 +834,7 @@ El sistema opera en dos modalidades:
 | **API abuse** | Rate limiting + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) validation + [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) (100 req/min/asesor) |
 | **Injection (prompt)** | Separación system/user prompt + input sanitization | [Prompt engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering) estructurado |
 | **Key compromise** | [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) + rotación automática | Rotación cada 30 días |
-| **Data at rest** | [KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) encryption en todos los servicios | RDS, S3, Redis con KMS |
+| **Data at rest** | [KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) encryption en todos los servicios | RDS, S3 con KMS |
 | **Payload interception** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) cifra todo el canal — el payload viaja protegido de extremo a extremo | Canal HTTPS estándar con certificados [ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) |
 
 ### 5.2 Seguridad en el Tránsito — TLS 1.3 + Buenas Prácticas
@@ -981,7 +975,7 @@ El proyecto se desarrolla con **Scrum** adaptado a un equipo de 1 persona (desar
 
 ### 6.2 Ambientes
 
-Todos los ambientes usan el **mismo stack** (RAG + KB Lambda + RDS + Redis). La diferencia está en el dimensionamiento y el schedule de apagado:
+Todos los ambientes usan el **mismo stack** (RAG + KB Lambda + RDS). La diferencia está en el dimensionamiento y el schedule de apagado:
 
 | Ambiente | Propósito | Apagado nocturno | Período |
 |----------|-----------|------------------|---------|
@@ -1105,7 +1099,7 @@ gantt
 
 | Actividad | Entregable |
 |-----------|------------|
-| [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) Semantic Cache (umbral 0.92) | Cache operativo, ~68% menos llamadas a LLM |
+| Tabla `semantic_cache` en RDS pgvector (embedding + respuesta, umbral coseno ≥0.95) | Cache operativo, ~68% menos llamadas a LLM. Se limpia automáticamente al actualizar documentos |
 | Optimización de latencia (target: p95 < 2s) | Rendimiento optimizado |
 | [Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) auto-scaling + [Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html) | Costos optimizados |
 | **Demo 9:** Rendimiento medido y documentado | ✅ |
@@ -1161,18 +1155,17 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ECS Fargate | RAG, apagado 12h/día | ~$40 | ~$138.000 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD + presigned URLs. ~50 invocaciones/mes | ~$0.10 | ~$345 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
-| RDS db.t4g.small | 50 GB gp3, apagado 12h/día (storage siempre activo) | ~$16 | ~$55.200 |
+| RDS db.t4g.small<br/>(incluye semantic cache) | 50 GB gp3, apagado 12h/día (storage siempre activo) | ~$16 | ~$55.200 |
 | Bedrock (Claude Haiku) | 1K conversaciones/mes (pruebas) | ~$5 | ~$17.250 |
 | Titan Embeddings | 500 documentos | ~$0.01 | ~$35 |
-| ElastiCache (Redis) | Serverless, 0.5 GB (auto-pause cuando sin uso) | ~$10 | ~$34.500 |
 | S3 + CloudFront | 5 GB, 10K requests | ~$2 | ~$6.900 |
 | Step Functions | Pruebas de ingesta | ~$1 | ~$3.450 |
 | CloudWatch Logs + metric filters | Logs + métricas de latencia y errores + alarmas | ~$10 | ~$34.500 |
 | KMS + ACM | 2 keys | ~$2 | ~$6.900 |
 | Infraestructura adicional compartida | VPC, NAT, WAF, Route53, Secrets | ~$60 | ~$207.000 |
-| **Total Desarrollo** | | **~$146/mes** | **~$504.380/mes** |
+| **Total Desarrollo** | | **~$136/mes** | **~$469.880/mes** |
 
-> **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, NAT, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente.
+> **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, NAT, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente. El semantic cache en RDS (pgvector) reemplaza a ElastiCache, ahorrando ~$10/mes en desarrollo y ~$30/mes en producción.
 
 #### Producción (100 asesores)
 
@@ -1183,18 +1176,17 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ECS Fargate | RAG, 2-4 réplicas | ~$80 | ~$276.000 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~200 invocaciones/mes × 45s | ~$0.50 | ~$1.725 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
-| RDS db.t4g.small | 50 GB gp3, 24/7 | ~$28 | ~$96.600 |
+| RDS db.t4g.small<br/>(incluye semantic cache) | 50 GB gp3, 24/7 | ~$28 | ~$96.600 |
 | Bedrock (Claude Sonnet + Haiku) | 60K conversaciones/mes (6× respecto a estimación anterior) | ~$600 | ~$2.070.000 |
 | Titan Embeddings | 10K documentos/mes | ~$0.20 | ~$690 |
-| ElastiCache (Redis) | Serverless, 2 GB (más volumen de caché) | ~$30 | ~$103.500 |
 | S3 + CloudFront (widget + KB Admin) | 20 GB, 100K requests | ~$7 | ~$24.150 |
 | Step Functions | Ingesta documentos + pipeline KB | ~$5 | ~$17.250 |
 | CloudWatch + X-Ray + metric filters | Logs, métricas (latencia, errores), dashboards, alarmas | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$917/mes** | **~$3.162.815/mes** |
+| **Total Producción** | | **~$887/mes** | **~$3.059.315/mes** |
 
-> **Ahorro combinado en Producción (KB Lambda + BFF + Analytics + RDS):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. RDS db.t4g.small en vez de Aurora ahorra ~$52/mes. Total: **~$151.50/mes USD** (~$522.675 COP/mes) por ambiente 24/7.
+> **Ahorro combinado en Producción (KB Lambda + BFF + Analytics + RDS + Cache):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. RDS db.t4g.small en vez de Aurora ahorra ~$52/mes. Cache en RDS (pgvector) en vez de ElastiCache ahorra ~$30/mes. Total: **~$181.50/mes USD** (~$626.175 COP/mes) por ambiente 24/7.
 
 #### Escalado (500+ asesores)
 
@@ -1204,27 +1196,25 @@ Tasa de cambio: $1 USD = $3,450 COP
 | API Gateway HTTP | 15M requests/mes (300K consultas × ~50 llamadas internas) | $15.00 | ~$51.750 |
 | ECS Fargate | RAG, 3-6 réplicas | ~$230 | ~$793.500 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~500 invocaciones/mes × 45s | ~$1 | ~$3.450 |
-| RDS db.t4g.large | 100 GB gp3, HA multi-AZ | ~$112 | ~$386.400 |
+| RDS db.t4g.large<br/>(incluye semantic cache) | 100 GB gp3, HA multi-AZ | ~$112 | ~$386.400 |
 | Bedrock (Sonnet + Haiku routing) | 300K conversaciones/mes (6× respecto a estimación anterior) | ~$3.000 | ~$10.350.000 |
 | Titan Embeddings | 50K documentos/mes | ~$1 | ~$3.450 |
-| ElastiCache (Redis) | Serverless, 10 GB (5× más volumen de caché) | ~$80 | ~$276.000 |
 | S3 + CloudFront | 100 GB, 500K requests | ~$20 | ~$69.000 |
 | Step Functions | Ingesta + workflows | ~$20 | ~$69.000 |
 | CloudWatch + X-Ray + metric filters | Logs + métricas + dashboards + alarmas | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$3.752/mes** | **~$12.944.400/mes** |
-| **Total Escalado** | | **~$3.752/mes** | **~$12.944.400/mes** |
+| **Total Escalado** | | **~$3.672/mes** | **~$12.667.900/mes** |
 
 ### 7.2 Proyección Anual
 
 | Mes | Fase | Ambientes activos | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
 |-----|------|-------------------|---------------------|---------------------|
-| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$504.000/mes | ~$146/mes |
-| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$1.263.000/mes | ~$366/mes |
-| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.667.000/mes | ~$1.063/mes |
-| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$13.448.000/mes | ~$3.898/mes |
-| **Total Año 1** | **Proyección AWS** | | **~$46.000.000-51.000.000/año** | **~$13.350-14.800/año** |
+| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$470.000/mes | ~$136/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$1.160.000/mes | ~$336/mes |
+| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.529.000/mes | ~$1.023/mes |
+| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$13.138.000/mes | ~$3.808/mes |
+| **Total Año 1** | **Proyección AWS** | | **~$42.000.000-47.000.000/año** | **~$12.200-13.600/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1237,7 +1227,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 
 | Estrategia | Ahorro (escenarios) | Implementación |
 |-----------|---------------------|---------------|
-| **Semantic Cache** (Redis) | **Optimista 68% / Normal 45% / Pesimista 25%** en costos LLM | Umbral similitud 0.92, ajustable. **⚠️ Riesgo para el sector funerario:** Una consulta sobre "planes para contratar" es muy distinta a "acabo de perder un ser querido". El caché puede devolver respuestas contextualmente inapropiadas si el umbral de similitud es muy bajo. Se recomienda: (a) umbral conservador (≥0.95), (b) desactivar el caché para consultas con tono emocional detectado, (c) monitorear manualmente durante el piloto |
+| **Semantic Cache** (pgvector en RDS) | **Optimista 68% / Normal 45% / Pesimista 25%** en costos LLM | Busca respuestas similares por embedding (umbral coseno ≥0.95) en tabla `semantic_cache`. Sin servicio adicional — usa RDS existente. **Ventaja sobre Redis:** cachea consultas parafraseadas que un hash exacto nunca capturaría. **⚠️ Riesgo para el sector funerario:** Una consulta sobre "planes para contratar" es muy distinta a "acabo de perder un ser querido". El caché puede devolver respuestas contextualmente inapropiadas si el umbral de similitud es muy bajo. Se recomienda: (a) umbral conservador (≥0.95), (b) desactivar el caché para consultas con tono emocional detectado, (c) monitorear manualmente durante el piloto. **Invalidación automática:** Al subir o actualizar documentos se ejecuta `DELETE FROM semantic_cache` |
 | **Routing inteligente** (Sonnet ↔ Haiku) | **Optimista 30% / Normal 18% / Pesimista 0%** (si se desactiva por calidad) | Tareas simples → Haiku, complejas → Sonnet |
 | **Eliminación del BFF** | **~$50/mes (24/7) por ambiente** | API Gateway → RAG ECS directo. El RAG Service maneja SSE streaming y orquestación. Ahorro fijo, sin depender de patrones de uso |
 | **[API Gateway + JWT Authorizer](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html)** | **~$25/mes** vs tener un servicio ECS dedicado a auth | Auth delegada a API Gateway (JWT validation nativa). Opción 2 usa Cognito directo (PKCE), Opción 1 usa Lambda handshake (~$0.10/mes) |
@@ -1521,8 +1511,8 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 |---------|----------------------|:-----------------------------------:|
 | **Inversión inicial** | $48M (todo desarrollo) | **$15M** (Op. 1) / **$18.5M** (Op. 2) |
 | **Costo mensual** | $0 (solo desarrollo) | **$5.500.000/mes** (único para ambas opciones) |
-| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$25M = **~$73M** | **$81M** (Op. 1) / **$84.5M** (Op. 2) |
-| **Costo año 2+** | AWS: ~$56M + soporte externo: ~$108M = **~$164M/año** | **$66M/año** |
+| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$23M = **~$71M** | **$81M** (Op. 1) / **$84.5M** (Op. 2) |
+| **Costo año 2+** | AWS: ~$51M + soporte externo: ~$108M = **~$159M/año** | **$66M/año** |
 | **App anfitriona** | ❌ A cargo del cliente | ✅ Incluida en Op. 2 / ❌ A cargo del cliente en Op. 1 |
 | **Auth / Login** | ❌ A cargo del cliente | ✅ Nosotros (Op. 2) / ❌ A cargo del cliente (Op. 1) |
 | **Soporte continuo** | ❌ No incluido | ✅ Incluido |
@@ -1555,7 +1545,6 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 - Amazon S3 Pricing: https://aws.amazon.com/s3/pricing/
 - AWS KMS Pricing: https://aws.amazon.com/kms/pricing/
 - AWS ACM Pricing: https://aws.amazon.com/acm/pricing/
-- ElastiCache Pricing: https://aws.amazon.com/elasticache/pricing/
 - Lambda@Edge Pricing: https://aws.amazon.com/lambda/pricing/ (aplica si se usa para otro propósito)
 
 ### 8.2 Precios Oficiales Azure

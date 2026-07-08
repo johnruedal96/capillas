@@ -52,10 +52,10 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 
 | Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
 |-------|-----------------|------------------|----------|-------------|
-| **Desarrollo** | ~$136/mes | ~$470.000 | < 10 asesores | 1 ECS (RAG) + Lambda (KB + Auth), apagado nocturno |
-| **Piloto (5-10 asesores)** | ~$200/mes | ~$690.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
-| **Producción (100 asesores)** | ~$887/mes | ~$3.059.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
-| **Escalado (500+ asesores)** | ~$3.672/mes | ~$12.668.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
+| **Desarrollo** | ~$111/mes | ~$383.000 | < 10 asesores | 1 ECS (RAG) + Lambda (KB + Auth), apagado nocturno |
+| **Piloto (5-10 asesores)** | ~$175/mes | ~$604.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
+| **Producción (100 asesores)** | ~$852/mes | ~$2.939.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
+| **Escalado (500+ asesores)** | ~$3.647/mes | ~$12.582.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
 
 ---
 
@@ -512,9 +512,9 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 | **[CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) + [X-Ray](https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html)** | Monitoreo y tracing | Incluido con AWS |
 | **[Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html)** | Orquestación de ingesta de documentos | Flujos async con retry/error handling |
 | **[ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html)** | Registro de imágenes Docker | Sin costo de almacenamiento |
-| **[VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) + Subnets + Security Groups** | Red privada para microservicios | Gratis (el VPC en sí no tiene costo). Incluye subnets públicas/privadas, route tables, internet gateway |
-| **[NAT Gateway](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html)** | Salida a internet desde subnets privadas | ~$33/mes + $0.045/GB procesado (~$50-70/mes con tráfico típico). Alternativa más barata: [VPC Gateway Endpoints](https://docs.aws.amazon.com/vpc/latest/privatelink/gateway-endpoints.html) para [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)/[DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) (gratis) |
-| **IPv4 Públicos** | IPs elásticas para NAT Gateway, balanceadores | $0.005/hr ≈ $3.60/mes por IP. Estimar 2-3 IPs |
+| **[VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) + Subnets + Security Groups** | Red privada para microservicios | Gratis (el VPC en sí no tiene costo). Incluye subnets públicas/privadas, route tables |
+| **[VPC Endpoint (PrivateLink)](https://docs.aws.amazon.com/vpc/latest/privatelink/vpce-interface.html)** | Acceso privado a Bedrock desde subnet privada | ~$0.01/hr + $0.01/GB procesado (~$7-10/mes). Reemplaza al NAT Gateway (~$50-70/mes). El tráfico nunca sale a internet — más seguro y más barato |
+| **IPv4 Públicos** | IPs elásticas para balanceadores | $0.005/hr ≈ $3.60/mes por IP. Estimar 1 IP |
 | **[AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html)** | Protección web en el edge + rate limiting, integrado con [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | $5/mes por Web ACL + $0.60/1M requests. ~$15-25/mes con tráfico típico |
 | **[Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html)** | DNS, dominio, health checks | $0.50/zone/mes + ~$12/año por dominio .com |
 | **[CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Logs** | Logs de microservicios y auditoría | $0.50/GB ingerido (primeros 5GB gratis). ~$5-10/mes con retención 30 días |
@@ -522,7 +522,7 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 | **[ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html)** | Registro de imágenes Docker | $0.10/GB/mes de storage. ~$1-3/mes con limpieza automática |
 | **[EC2 Instance Connect Endpoint](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-connect-endpoint.html)** | Acceso seguro a DB sin bastion host | **Gratis** (reemplaza al bastion host tradicional ~$3-15/mes) |
 
-> **Nota sobre servicios de red:** Servicios como [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html), [NAT Gateway](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html), [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) y [Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) son "infraestructura invisible" — el cliente no los ve pero son necesarios para operar. Estimado adicional de ~$80-130/mes sobre la tabla de costos base.
+> **Nota sobre servicios de red:** Servicios como [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) (gratis), [VPC Endpoint](https://docs.aws.amazon.com/vpc/latest/privatelink/vpce-interface.html) (~$7-10/mes), [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) (~$15-25/mes) y [Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) (~$0.50/mes) son "infraestructura invisible" — el cliente no los ve pero son necesarios para operar. Estimado adicional de ~$50-80/mes sobre la tabla de costos base (vs ~$80-130/mes con NAT Gateway).
 
 #### 3.3.2 Recursos y Dimensionamiento por Ambiente
 
@@ -545,9 +545,9 @@ El sistema tiene un **stack único** que se replica en todos los ambientes (desa
 | **RDS pgvector** | db.t4g.small, 50 GB gp3<br/>(incluye semantic cache) | 1 | ~$14/mes (12h) | ~$28/mes |
 | **Total servicios** | | | **~$55/mes** | **~$109/mes** |
 
-El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno). También se eliminó el Analytics ECS (0.25 vCPU, 0.5 GB) — ~$25/mes por ambiente 24/7 (~$12/mes en desarrollo). El cambio de Aurora Serverless v2 a RDS db.t4g.small ahorra ~$52/mes en producción 24/7 (~$14/mes en desarrollo nocturno). Toda la observabilidad se maneja con CloudWatch nativo.
+El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno). También se eliminó el Analytics ECS (0.25 vCPU, 0.5 GB) — ~$25/mes por ambiente 24/7 (~$12/mes en desarrollo). El cambio de Aurora Serverless v2 a RDS db.t4g.small ahorra ~$52/mes en producción 24/7 (~$14/mes en desarrollo nocturno). El VPC Endpoint (PrivateLink) reemplaza al NAT Gateway, ahorrando ~$35-45/mes en producción 24/7 (~$25/mes en desarrollo). Toda la observabilidad se maneja con CloudWatch nativo.
 
-> **Nota:** Los costos de infraestructura adicional (VPC, NAT Gateway, WAF, Route53, CloudWatch Logs, Secrets Manager) suman ~$80-130/mes sin importar cuántos ambientes haya — ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados). Estos costos fijos se comparten entre ambientes cuando usan la misma VPC.
+> **Nota:** Los costos de infraestructura adicional (VPC, VPC Endpoint para Bedrock, WAF, Route53, CloudWatch Logs, Secrets Manager) suman ~$50-80/mes sin importar cuántos ambientes haya — ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados). Esto reemplaza al NAT Gateway (~$50-70/mes) por un VPC Endpoint (~$7-10/mes), ahorrando ~$40-60/mes.
 
 ### 3.4 CI/CD — Pipeline de Despliegue Continuo
 
@@ -736,7 +736,7 @@ El sistema opera en dos modalidades:
 
 **Recomendación: [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html)** — Transferencia S3→CF gratis, free tier de 1TB/mes.
 
-> **Nota importante:** La tabla comparativa de costos de AWS vs Azure vs GCP incluye servicios directos (compute, DB, LLM). Excluye servicios de red e infraestructura de soporte ([VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html), [NAT Gateway](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html), [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html), [Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html), [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html), [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)) que son necesarios pero aplican a cualquier proveedor cloud. Para AWS, estos servicios adicionales suman ~$80-130/mes. Ver detalle en sección 7.
+> **Nota sobre servicios de red:** Servicios como [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) (gratis), [VPC Endpoint](https://docs.aws.amazon.com/vpc/latest/privatelink/vpce-interface.html) (~$7-10/mes), [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) (~$15-25/mes), [Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) (~$0.50/mes), [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Logs (~$5-15/mes), [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) (~$8-15/mes) y [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) (~$1-3/mes) son "infraestructura invisible" — el cliente no los ve pero son necesarios para operar. Estimado adicional de ~$50-80/mes sobre la tabla de costos base (vs ~$80-130/mes con NAT Gateway).
 
 #### 4.1.7 Resumen Comparativo de Costos (USD y COP)
 
@@ -752,8 +752,8 @@ El sistema opera en dos modalidades:
 | Storage convs | $50-150 | ~$172.500-517.500 | $25-50 | ~$86.250-172.500 | $10-30 | ~$34.500-103.500 |
 | Cache | $0 (en RDS pgvector) | $0 | ~$30 | ~$103.500 | ~$20 | ~$69.000 |
 | Cifrado | $1-5 | ~$3.450-17.250 | ~$10 | ~$34.500 | $2-5 | ~$6.900-17.250 |
-| Infraestructura adicional | ~$80-130 | ~$276.000-448.500 | ~$80-130 | ~$276.000-448.500 | ~$80-130 | ~$276.000-448.500 |
-| **TOTAL/mes** | **~$280-930** | **~$966.000-3.208.500** | **~$880-1.530** | **~$3.036.000-5.278.500** | **~$480-1.130** | **~$1.656.000-3.898.500** |
+| Infraestructura adicional | ~$50-80 | ~$172.500-276.000 | ~$80-130 | ~$276.000-448.500 | ~$80-130 | ~$276.000-448.500 |
+| **TOTAL/mes** | **~$230-850** | **~$793.500-2.932.500** | **~$880-1.530** | **~$3.036.000-5.278.500** | **~$480-1.130** | **~$1.656.000-3.898.500** |
 
 > **Nota sobre precios en COP y riesgo cambiario:** Todos los precios de servicios cloud están en USD. Las equivalencias en COP usan la TRM de referencia ($1 USD = $3.450 COP, junio 2026) solo como referencia. El costo real en COP dependerá de la TRM del momento del pago. Históricamente el COP ha fluctuado entre $3.000 y $4.500 en los últimos 5 años. **Nuestros servicios de soporte y mantenimiento (Modelo B) tienen precios fijos en COP**, pero el componente de infraestructura AWS varía con el dólar.
 >
@@ -1142,7 +1142,7 @@ Después del Sprint 5 (MVP funcional en QA), se despliega a producción con 5-10
 > - *\*Un asesor comercial de campo puede hacer 50-100 visitas/día pero no todas generan una consulta al sistema. Estimamos que ~30 visitas resultan en una interacción con el asistente. Este número se ajustará con datos reales de producción.*
 > - Los costos varían significativamente según el modelo usado (Sonnet vs Haiku) y la efectividad del caché y routing. Ver escenarios en [sección 3.2.4](#324-model-routing--clasificador-de-complejidad-de-consulta)
 >
-> **Servicios de infraestructura adicionales:** Las tablas incluyen una fila "Infraestructura adicional" que cubre [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) (gratis), [NAT Gateway](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html) (~$33-50/mes), [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) (~$15-25/mes), [Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) (~$0.50/mes), [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Logs (~$5-15/mes), [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) (~$8-15/mes), y [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) (~$1-3/mes). Ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados).
+> **Servicios de infraestructura adicionales:** Las tablas incluyen una fila "Infraestructura adicional" que cubre [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html) (gratis), [VPC Endpoint](https://docs.aws.amazon.com/vpc/latest/privatelink/vpce-interface.html) para Bedrock (~$7-10/mes), [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) (~$15-25/mes), [Route53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html) (~$0.50/mes), [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) Logs (~$5-15/mes), [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) (~$8-15/mes), y [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) (~$1-3/mes). Ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados).
 
 Tasa de cambio: $1 USD = $3,450 COP
 
@@ -1162,10 +1162,10 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Step Functions | Pruebas de ingesta | ~$1 | ~$3.450 |
 | CloudWatch Logs + metric filters | Logs + métricas de latencia y errores + alarmas | ~$10 | ~$34.500 |
 | KMS + ACM | 2 keys | ~$2 | ~$6.900 |
-| Infraestructura adicional compartida | VPC, NAT, WAF, Route53, Secrets | ~$60 | ~$207.000 |
-| **Total Desarrollo** | | **~$136/mes** | **~$469.880/mes** |
+| Infraestructura adicional compartida | VPC, VPC Endpoint, WAF, Route53, Secrets | ~$35 | ~$120.750 |
+| **Total Desarrollo** | | **~$111/mes** | **~$382.880/mes** |
 
-> **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, NAT, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente. El semantic cache en RDS (pgvector) reemplaza a ElastiCache, ahorrando ~$10/mes en desarrollo y ~$30/mes en producción.
+> **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, VPC Endpoint, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente. El semantic cache en RDS (pgvector) reemplaza a ElastiCache, ahorrando ~$10/mes en desarrollo y ~$30/mes en producción. El VPC Endpoint (PrivateLink) reemplaza al NAT Gateway, ahorrando ~$25/mes en desarrollo y ~$35/mes en producción.
 
 #### Producción (100 asesores)
 
@@ -1183,10 +1183,10 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Step Functions | Ingesta documentos + pipeline KB | ~$5 | ~$17.250 |
 | CloudWatch + X-Ray + metric filters | Logs, métricas (latencia, errores), dashboards, alarmas | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
-| Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$887/mes** | **~$3.059.315/mes** |
+| Infraestructura adicional | VPC, VPC Endpoint, WAF, Route53, Logs, Secrets, GitHub Actions | ~$65 | ~$224.250 |
+| **Total Producción** | | **~$852/mes** | **~$2.939.315/mes** |
 
-> **Ahorro combinado en Producción (KB Lambda + BFF + Analytics + RDS + Cache):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. RDS db.t4g.small en vez de Aurora ahorra ~$52/mes. Cache en RDS (pgvector) en vez de ElastiCache ahorra ~$30/mes. Total: **~$181.50/mes USD** (~$626.175 COP/mes) por ambiente 24/7.
+> **Ahorro combinado en Producción (KB Lambda + BFF + Analytics + RDS + Cache + VPC Endpoint):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. RDS db.t4g.small en vez de Aurora ahorra ~$52/mes. Cache en RDS (pgvector) en vez de ElastiCache ahorra ~$30/mes. VPC Endpoint en vez de NAT Gateway ahorra ~$35/mes. Total: **~$216.50/mes USD** (~$747.000 COP/mes) por ambiente 24/7.
 
 #### Escalado (500+ asesores)
 
@@ -1203,18 +1203,18 @@ Tasa de cambio: $1 USD = $3,450 COP
 | Step Functions | Ingesta + workflows | ~$20 | ~$69.000 |
 | CloudWatch + X-Ray + metric filters | Logs + métricas + dashboards + alarmas | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
-| Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$3.672/mes** | **~$12.667.900/mes** |
+| Infraestructura adicional | VPC, VPC Endpoint, WAF, Route53, Logs, Secrets, CI/CD | ~$90 | ~$310.500 |
+| **Total Escalado** | | **~$3.647/mes** | **~$12.581.900/mes** |
 
 ### 7.2 Proyección Anual
 
 | Mes | Fase | Ambientes activos | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
 |-----|------|-------------------|---------------------|---------------------|
-| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$470.000/mes | ~$136/mes |
-| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$1.160.000/mes | ~$336/mes |
-| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.529.000/mes | ~$1.023/mes |
-| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$13.138.000/mes | ~$3.808/mes |
-| **Total Año 1** | **Proyección AWS** | | **~$42.000.000-47.000.000/año** | **~$12.200-13.600/año** |
+| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$383.000/mes | ~$111/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$987.000/mes | ~$286/mes |
+| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.322.000/mes | ~$963/mes |
+| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$12.965.000/mes | ~$3.758/mes |
+| **Total Año 1** | **Proyección AWS** | | **~$39.000.000-44.000.000/año** | **~$11.300-12.800/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1231,12 +1231,13 @@ Tasa de cambio: $1 USD = $3,450 COP
 | **Routing inteligente** (Sonnet ↔ Haiku) | **Optimista 30% / Normal 18% / Pesimista 0%** (si se desactiva por calidad) | Tareas simples → Haiku, complejas → Sonnet |
 | **Eliminación del BFF** | **~$50/mes (24/7) por ambiente** | API Gateway → RAG ECS directo. El RAG Service maneja SSE streaming y orquestación. Ahorro fijo, sin depender de patrones de uso |
 | **[API Gateway + JWT Authorizer](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html)** | **~$25/mes** vs tener un servicio ECS dedicado a auth | Auth delegada a API Gateway (JWT validation nativa). Opción 2 usa Cognito directo (PKCE), Opción 1 usa Lambda handshake (~$0.10/mes) |
+| **[VPC Endpoint (PrivateLink)](https://docs.aws.amazon.com/vpc/latest/privatelink/vpce-interface.html)** para Bedrock | **~$35-45/mes** vs NAT Gateway | El RAG ECS accede a Bedrock por la red interna de AWS sin NAT Gateway. Tráfico nunca sale a internet — más seguro y más barato. Costo: ~$7-10/mes vs ~$50-70/mes de NAT Gateway |
 | **[Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html)** (1 año) | 30-50% en compute | Comprometerse a $50/mes (~$172.500 COP/mes) |
 | **[Batch Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)** | 50% en inferencia para procesamiento por lotes. Batch Bedrock permite enviar cientos de prompts en un archivo JSONL a [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html), [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) los procesa asincrónicamente (hasta 24h) a mitad de precio. Ideal para: ingestas nocturnas de documentos, generación de metadata, resúmenes automáticos de documentos, procesamiento de histórico de conversaciones | Procesamiento nocturno de documentos |
 | **[KB API en Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | **~$24/mes** (~$83.000 COP/mes) vs un servicio ECS 24/7 | Las operaciones del KB Admin (subir, listar, eliminar) son esporádicas. Lambda escala a 0 y solo cobra por uso. A ~200 operaciones/mes × ~45s, el costo es < $1/mes vs ~$25/mes de un ECS 0.5 vCPU 24/7 |
 | **[CloudFront free tier](https://aws.amazon.com/free/)** | 1TB/mes gratis | Aprovechar los primeros meses |
 | **[S3 Intelligent Tiering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html)** | Hasta 40% en storage | Datos de conversaciones con acceso variable |
-| **Escenarios de ahorro combinado total** | **Optimista: ~65% / Normal: ~45% / Pesimista: ~20%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$3.16M COP/mes → Optimista ~$1.1M; Normal ~$1.7M; Pesimista ~$2.5M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF, Analytics, uso de RDS en vez de Aurora y reemplazo de servicios ECS por Lambda (KB API) reducen la base estructural de costos |
+| **Escenarios de ahorro combinado total** | **Optimista: ~68% / Normal: ~48% / Pesimista: ~23%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$2.94M COP/mes → Optimista ~$0.9M; Normal ~$1.5M; Pesimista ~$2.3M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF, Analytics, uso de RDS en vez de Aurora, reemplazo de servicios ECS por Lambda (KB API) y VPC Endpoint en vez de NAT Gateway reducen la base estructural de costos |
 
 ---
 
@@ -1511,8 +1512,8 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 |---------|----------------------|:-----------------------------------:|
 | **Inversión inicial** | $48M (todo desarrollo) | **$15M** (Op. 1) / **$18.5M** (Op. 2) |
 | **Costo mensual** | $0 (solo desarrollo) | **$5.500.000/mes** (único para ambas opciones) |
-| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$23M = **~$71M** | **$81M** (Op. 1) / **$84.5M** (Op. 2) |
-| **Costo año 2+** | AWS: ~$51M + soporte externo: ~$108M = **~$159M/año** | **$66M/año** |
+| **Costo año 1 total** | ~$48M (desarrollo) + AWS ~$21M = **~$69M** | **$81M** (Op. 1) / **$84.5M** (Op. 2) |
+| **Costo año 2+** | AWS: ~$46M + soporte externo: ~$108M = **~$154M/año** | **$66M/año** |
 | **App anfitriona** | ❌ A cargo del cliente | ✅ Incluida en Op. 2 / ❌ A cargo del cliente en Op. 1 |
 | **Auth / Login** | ❌ A cargo del cliente | ✅ Nosotros (Op. 2) / ❌ A cargo del cliente (Op. 1) |
 | **Soporte continuo** | ❌ No incluido | ✅ Incluido |

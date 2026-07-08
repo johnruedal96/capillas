@@ -33,7 +33,8 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | Capa | Tecnología | Especificación |
 |------|-----------|----------------|
 | **Frontend (Widget)** | [Lit 3](https://lit.dev/docs/) + [Custom Elements](https://developer.mozilla.org/en-US/docs/Web/API/Web_components) + [Vite IIFE](https://vite.dev/guide/build.html#library-mode) | Bundle ~20KB gzip, [Shadow DOM](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM) nativo, 0 dependencias del host |
-| **Autenticación** | [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [OIDC](https://openid.net/specs/openid-connect-core-1_0.html) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) | 10K MAU gratis, MFA, SSO SAML/OIDC |
+| **Autenticación (Opción 2)** | [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (Python 3.12) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + bcrypt + [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) | Login, logout, refresh token, cambio de contraseña, reseteo de contraseña. Lambda serverless — sin costo en reposo, cold start irrelevante por baja frecuencia |
+| **Autenticación (Opción 1)** | [Auth Handshake Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (Python 3.12) + [RSA](https://datatracker.ietf.org/doc/html/rfc8017) handshake + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | Handshake RSA con sistema de auth existente del cliente. Lambda serverless |
 | **Backend** | [FastAPI](https://fastapi.tiangolo.com/) (Python 3.12) + [gRPC](https://grpc.io/docs/) | Async nativo, [SSE streaming](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), tipado fuerte |
 | **RAG Orchestration** | [LlamaIndex](https://docs.llamaindex.ai/) (retrieval) + [LangChain](https://python.langchain.com/docs/) (agentes) | Mejor RAG out-of-box + agentes complejos |
 | **Vector Database** | [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector) | db.t4g.small — $28/mes 24/7 ($14/mes apagado nocturno). SQL + vectores en una DB, sin costo extra de licencia |
@@ -41,7 +42,7 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **LLM Principal** | [Claude Sonnet 4.6](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$10.350/$51.750 COP por MTok, 200K contexto |
 | **LLM Económico** | [Claude Haiku 4.5](https://aws.amazon.com/bedrock/claude/) (Bedrock) | ~$3.450/$17.250 COP por MTok, tareas simples alto volumen |
 | **Caché** | [pgvector](https://github.com/pgvector/pgvector) semantic cache en [RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) (tabla `semantic_cache` con embedding + índice HNSW) | Cache semántico por similitud de vectores en vez de hash exacto. No requiere servicio adicional. Se limpia automáticamente al subir/actualizar documentos. Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%** |
-| **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes. KB API en Lambda (escala a 0) |
+| **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes. KB API + Login + Auth Handshake en Lambda (escala a 0) |
 | **Cifrado** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [ACM (TLS 1.3)](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) todo el canal + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | ACM gratuito, KMS ~$3.450/key/mes COP |
 | **Observabilidad** | [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) + [X-Ray](https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html) | Logs, métricas (latencia, errores), alarmas y dashboards nativos AWS. Sin costos adicionales de herramientas externas |
 | **CI/CD** | [GitHub Actions](https://docs.github.com/en/actions) + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) | Despliegue automatizado [blue/green](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html) |
@@ -52,10 +53,10 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 
 | Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
 |-------|-----------------|------------------|----------|-------------|
-| **Desarrollo** | ~$103/mes | ~$355.000 | < 10 asesores | 1 ECS (RAG) ARM64 + Lambda (KB + Auth), apagado nocturno |
-| **Piloto (5-10 asesores)** | ~$167/mes | ~$576.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
-| **Producción (100 asesores)** | ~$836/mes | ~$2.883.000 | 100 asesores | 1 ECS (RAG) ARM64 + Lambda + RDS, 24/7 |
-| **Escalado (500+ asesores)** | ~$3.601/mes | ~$12.423.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
+| **Desarrollo** | ~$104/mes | ~$357.000 | < 10 asesores | 1 ECS (RAG) ARM64 + Lambda (KB + Login + Auth Handshake), apagado nocturno |
+| **Piloto (5-10 asesores)** | ~$167/mes | ~$576.000 | 5-10 asesores | 1 ECS (RAG) ARM64 + Lambda (KB + Login + Auth Handshake) + RDS, 24/7 |
+| **Producción (100 asesores)** | ~$837/mes | ~$2.885.000 | 100 asesores | 1 ECS (RAG) ARM64 + Lambda (KB + Login + Auth Handshake) + RDS, 24/7 |
+| **Escalado (500+ asesores)** | ~$3.602/mes | ~$12.426.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
 
 ---
 
@@ -68,27 +69,27 @@ El sistema soporta **dos modalidades de despliegue** según la infraestructura q
 | Aspecto | Opción 1 — Widget solo | Opción 2 — App completa |
 |---------|----------------------|------------------------|
 | **¿Quién provee la app anfitriona?** | Capillas de la Fe (su app existente: WordPress, React, etc.) | Nosotros creamos una app SPA minimalista |
-| **¿Quién maneja el login?** | Capillas de la Fe (su propio sistema de auth existente) | Nosotros ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)) |
-| **¿Cómo recibe el token el widget?** | Frontend usa SDK Capillas (CDN). SDK hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con Auth Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) → recibe [JWT](https://datatracker.ietf.org/doc/html/rfc7519) → lo pasa al widget vía atributo `token` | Flujo [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) manejado por el widget |
-| **Widget muestra login UI** | ❌ No — el frontend obtiene token via SDK sin intervención del usuario | ✅ Sí — el widget abre ventana [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) |
-| **Cognito necesario** | ❌ No — la Auth Lambda genera y firma el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) con su propia key. El frontend del cliente autentica usuarios con su sistema, llama a nuestro SDK (CDN), que hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con la Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) y recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nosotros | ✅ Sí — [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) maneja [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636). Los tokens (Access, Refresh, ID) los genera Cognito |
-| **Complejidad de integración** | Baja — el desarrollador del cliente agrega `<script>`, llama a `CapillasAuth.exchange()` y pasa el token al widget. No requiere configurar [OAuth](https://datatracker.ietf.org/doc/html/rfc6749), redirect URIs, ni flujos de autorización | Media — requiere configurar Cognito User Pool, Client IDs, OAuth scopes, redirect URIs, y manejar el flujo [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) |
-| **Ideal para** | Capillas ya tiene app con login propio | Capillas NO tiene app o quiere login gestionado |
+| **¿Quién maneja el login?** | Capillas de la Fe (su propio sistema de auth existente) | Nosotros ([Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + bcrypt + [JWT](https://datatracker.ietf.org/doc/html/rfc7519)) |
+| **¿Cómo recibe el token el widget?** | Frontend usa SDK Capillas (CDN). SDK hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con Auth Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) → recibe [JWT](https://datatracker.ietf.org/doc/html/rfc7519) → lo pasa al widget vía atributo `token` | Login Lambda valida credenciales vs [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html), genera [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + refresh token. El widget lo almacena en memoria |
+| **Widget muestra login UI** | ❌ No — el frontend obtiene token via SDK sin intervención del usuario | ✅ Sí — formulario de login propio (email + password) |
+| **Mecanismo de auth** | ❌ [Auth Handshake Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) — genera y firma el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) con su propia key. El frontend del cliente autentica usuarios con su sistema, llama a nuestro SDK (CDN), que hace [handshake RSA](https://datatracker.ietf.org/doc/html/rfc8017) con la Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) y recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por nosotros | ✅ [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) — maneja registro, login, logout, refresh token, cambio y reseteo de contraseña. Almacena usuarios en [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) (bcrypt + JWT). Las contraseñas viajan cifradas por [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). Opcionalmente se puede usar [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) si el cliente lo prefiere |
+| **Complejidad de integración** | Baja — el desarrollador del cliente agrega `<script>`, llama a `CapillasAuth.exchange()` y pasa el token al widget. No requiere configurar [OAuth](https://datatracker.ietf.org/doc/html/rfc6749), redirect URIs, ni flujos de autorización | Media — requiere implementar formularios de login/registro y conectar con Login Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
+| **Ideal para** | Capillas ya tiene app con login propio | Capillas NO tiene app o quiere control total del auth con Lambda serverless |
 
 ```mermaid
 graph TB
     subgraph LEGEND[Leyenda]
         OPT1[Opción 1: Widget solo<br/>El host ya tiene login propio]
-        OPT2[Opción 2: App completa<br/>Nosotros creamos app + login]
+        OPT2[Opción 2: App completa<br/>Nosotros creamos app + Login Lambda]
     end
 
     subgraph AWS["AMAZON WEB SERVICES"]
         GW[API Gateway HTTP<br/>JWT Auth + Rate Limiting]
-        AUTH[Amazon Cognito<br/>Solo en Opción 2]
+        LOGIN_LAMBDA[Login Lambda<br/>Registro, login, logout,<br/>refresh token, passwords<br/>Opción 2]
         AUTH_LAMBDA[Auth Handshake Lambda<br/>Solo en Opción 1]
         RAG[RAG Service FastAPI<br/>SSE streaming + LlamaIndex]
         LAMBDA_KB[KB API Lambda<br/>CRUD docs + presigned URLs]
-        RDS[(RDS PostgreSQL<br/>+ pgvector<br/>+ semantic cache)]
+        RDS[(RDS PostgreSQL<br/>+ pgvector<br/>+ semantic cache<br/>+ usuarios)]
         BEDROCK[Bedrock Claude]
         KMS[AWS KMS]
         S3[(Amazon S3)]
@@ -101,13 +102,15 @@ graph TB
 
     HOST -->|Carga widget desde CDN| CF
     HOST -->|Opción 1: SDK handshake RSA<br/>→ recibe JWT → atributo token| WIDGET
-    HOST -->|Opción 2: incluye login Cognito| AUTH
+    HOST -->|Opción 2: login via Login Lambda| LOGIN_LAMBDA
     WIDGET -->|Chat + KB Admin| GW
     GW -->|Valida JWT + rate limit → HTTP| RAG
     GW -->|KB operations| LAMBDA_KB
-    GW -->|"Auth handshake (Opción 1)"| AUTH_LAMBDA
+    GW -->|Auth handshake (Opción 1)| AUTH_LAMBDA
+    GW -->|Opción 2: /auth/* (login, register,<br/>refresh, password-reset)| LOGIN_LAMBDA
     LAMBDA_KB -->|Presigned URL → subida directa| S3
     LAMBDA_KB -->|CRUD metadata| RDS
+    LOGIN_LAMBDA -->|CRUD usuarios + refresh tokens| RDS
     RAG -->|pgvector| RDS
     RAG -->|Cache semántico| RDS
     RAG -->|Bedrock API| BEDROCK
@@ -198,35 +201,66 @@ El cliente solo necesita importar nuestro SDK (alojado en CDN) y llamar a una fu
 - El token final es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por la Lambda con una key que [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) reconoce → API Gateway valida el JWT en cada request sin depender de sistemas externos
 - Todos los requests posteriores del widget viajan por [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) con [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). El token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) va en el header `Authorization: Bearer` dentro del canal cifrado
 
-#### Opción 2 — Auth gestionada (Nosotros manejamos login y app)
+#### Opción 2 — Auth con Login Lambda (recomendada)
 
-Cuando Capillas no tiene app ni login, construimos una app SPA con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636). El flujo PKCE permite que el **navegador** intercambie el código de autorización directamente con Cognito — no se necesita un backend intermedio. El Access Token [JWT](https://datatracker.ietf.org/doc/html/rfc7519) resultante se envía en el header `Authorization: Bearer` a [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html), que lo valida contra el JWKS de Cognito de forma nativa.
+Cuando Capillas no tiene app ni login propio, construimos una app SPA minimalista que se conecta a la **Login Lambda** para manejar todo el ciclo de autenticación. Elegimos Lambda porque las operaciones de auth son esporádicas (login ~1-2 veces/día por asesor, password reset ~1 vez/mes) — el cold start es irrelevante (el usuario ya espera ~1-2s en un login) y el costo es几乎 cero vs un servicio 24/7.
+
+**Endpoints que expone la Login Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html):**
+
+| Endpoint | Método | Propósito |
+|----------|--------|-----------|
+| `/auth/register` | POST | Crear cuenta de asesor (solo admin) |
+| `/auth/login` | POST | Iniciar sesión: email + password → [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + refresh token |
+| `/auth/refresh` | POST | Renovar access token con refresh token |
+| `/auth/logout` | POST | Cerrar sesión: invalida refresh token |
+| `/auth/password-reset` | POST | Solicitar reseteo de contraseña (envía email con link) |
+| `/auth/password-change` | POST | Cambiar contraseña (autenticado) |
 
 ```mermaid
 sequenceDiagram
     participant App as App SPA (Nosotros)
     participant Widget as Widget
-    participant Popup as Ventana OAuth
-    participant Cognito as Amazon Cognito
     participant GW as API Gateway
+    participant Lambda as Login Lambda
+    participant DB as RDS PostgreSQL
 
-    App->>Widget: Carga widget
-    Widget->>App: Emite evento @capillas:needs-auth
-    App->>App: Abre ventana OAuth
-    App->>Popup: window.open con PKCE
-    Popup->>Cognito: Auth Request
-    Cognito-->>Popup: Login form
-    Asesor->>Popup: Credenciales
-    Popup->>Cognito: Autenticar
-    Cognito-->>Popup: Authorization Code
-    Popup->>Cognito: POST /oauth2/token<br/>code + code_verifier
-    Cognito-->>Popup: Access Token + Refresh Token
-    Popup-->>App: postMessage access_token
-    App->>Widget: Pasa token al widget
-    Widget->>Widget: Almacenar AT in-memory
-    Widget->>GW: API Call con JWT en header<br/>Authorization: Bearer
-    GW->>GW: Valida JWT contra Cognito JWKS
+    App->>App: Usuario ingresa email + password
+    App->>GW: POST /auth/login {email, password}
+    GW->>Lambda: Proxy a Lambda
+    Lambda->>Lambda: Valida credenciales con bcrypt
+    Lambda->>DB: SELECT hash, datos FROM usuarios WHERE email = ?
+    DB-->>Lambda: hash + user_data
+    Lambda->>Lambda: bcrypt.compare(password, hash)
+    Lambda->>Lambda: Genera JWT (15 min) + refresh token (30 días)
+    Lambda->>DB: INSERT refresh_token (hasheado)
+    Lambda-->>GW: {access_token, refresh_token, user}
+    GW-->>App: Response cifrado por TLS 1.3
+    App->>Widget: Pasa access_token al widget
+    Widget->>Widget: Almacena AT in-memory
+    Note over Widget: 15 min después...
+    Widget->>App: Emite evento @capillas:token-expiring
+    App->>GW: POST /auth/refresh {refresh_token}
+    GW->>Lambda: Proxy a Lambda
+    Lambda->>DB: Valida refresh token (hasheado + expiry)
+    DB-->>Lambda: Token válido
+    Lambda->>Lambda: Genera nuevo JWT
+    Lambda-->>GW: {access_token}
+    GW-->>App: Nuevo JWT
+    App->>Widget: Nuevo access_token
 ```
+
+**Seguridad del Login Lambda:**
+
+| Aspecto | Implementación |
+|---------|---------------|
+| **Passwords** | Almacenados con [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (cost factor 12) — nunca en texto plano |
+| **Refresh tokens** | Almacenados hasheados en [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) con fecha de expiración. Al hacer logout se eliminan |
+| **JWT signing** | Firmados con [HMAC-SHA256](https://datatracker.ietf.org/doc/html/rfc7518) usando una clave rotada periódicamente via [Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html) |
+| **Rate limiting** | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) limita a 5 intentos de login/minuto por IP para prevenir fuerza bruta |
+| **TLS 1.3** | Todo el tráfico viaja cifrado — passwords, tokens y datos personales nunca viajan en texto plano |
+| **Anti-replay** | Los refresh tokens son de un solo uso (rotación). Al usar uno, se invalida el anterior |
+
+> **Alternativa con Cognito:** Si el cliente prefiere una solución de auth gestionada sin necesidad de mantener la tabla de usuarios, se puede usar [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749) + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) en lugar de la Login Lambda. El flujo sería: la app SPA abre una ventana OAuth, el asesor se autentica contra Cognito, y el access token se pasa al widget. Sin embargo, la Login Lambda es la opción recomendada por: (a) no depender de un servicio externo, (b) tener control total del flujo, (c) costo prácticamente nulo en Lambda vs el tier gratuito de Cognito (que no es eterno), y (d) porque auth es un proceso esporádico ideal para Lambda.
 
 ### 2.4 Flujo de Seguridad — TLS 1.3
 
@@ -276,7 +310,7 @@ El widget expone una API de comunicación bidireccional que soporta los dos modo
 
 **Opción 1 — Widget solo (host maneja auth):** El host importa nuestro SDK de autenticación (CDN) y llama a una función con los datos del usuario. El SDK hace el handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) con la Auth Lambda via [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html), recibe el [JWT](https://datatracker.ietf.org/doc/html/rfc7519) y lo retorna. El host pasa ese token al widget mediante atributo HTML, propiedad JS o postMessage.
 
-**Opción 2 — App completa (nosotros manejamos auth):** La app SPA que nosotros construimos maneja el flujo [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html). Obtiene el token mediante el flujo estándar (authorization code + [PKCE](https://datatracker.ietf.org/doc/html/rfc7636)) y se lo pasa al widget.
+**Opción 2 — App completa (nosotros manejamos auth):** La app SPA que nosotros construimos se conecta a la [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) para manejar todo el ciclo de autenticación: login, logout, refresh token, cambio y reseteo de contraseña. El usuario ingresa su email y password en un formulario propio de la app SPA, la Login Lambda valida las credenciales contra la tabla de usuarios en [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) y devuelve un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) de acceso. Opcionalmente se puede usar [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) como alternativa si el cliente lo prefiere.
 
 **Comunicación host ↔ widget:**
 La comunicación entre el host y el widget es bidireccional. El host puede pasar el token al widget mediante atributo HTML, propiedad JavaScript o postMessage. El widget notifica al host cuando el token está por expirar mediante eventos DOM o postMessage.
@@ -287,7 +321,7 @@ El manejo de tokens difiere según la opción de despliegue. En ambos modos, el 
 
 **Opción 1 (Widget solo):** El host obtiene el token mediante el handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) (ver sección 2.3). El token es un [JWT](https://datatracker.ietf.org/doc/html/rfc7519) firmado por la Auth Lambda con vigencia de 15 minutos. Cuando expira, el host repite el handshake para obtener uno nuevo.
 
-**Opción 2 (App completa):** La app SPA maneja el flujo [OAuth](https://datatracker.ietf.org/doc/html/rfc6749) con [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html). Se utilizan tres tipos de token: Access Token ([JWT](https://datatracker.ietf.org/doc/html/rfc7519), 15 min, en memoria para API calls), Refresh Token (30 días, en cookie segura HttpOnly para renovar), e ID Token (1 hora, en memoria para perfil de usuario).
+**Opción 2 (App completa):** La app SPA se conecta a la [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) para login, registro y gestión de sesiones. Se utilizan dos tipos de token: Access Token ([JWT](https://datatracker.ietf.org/doc/html/rfc7519), 15 min, en memoria para API calls) y Refresh Token (30 días, almacenado hasheado en [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html), de un solo uso con rotación). Si se prefiere [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) como alternativa, se usarían tres tipos: Access Token, Refresh Token e ID Token.
 
 #### 3.1.6 Seguridad en el Widget
 
@@ -320,7 +354,7 @@ Se instala de la misma forma que el widget de chat: mediante un `<script>` tag y
 |------------|-----------|-------|
 | Framework | Lit 3 | Mismo que el widget de chat |
 | Build | Vite IIFE | Mismo bundle, mismo formato |
-| Autenticación | Opción 1: token del host<br/>Opción 2: [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) (rol admin) | Depende del modo de despliegue |
+| Autenticación | Opción 1: token del host<br/>Opción 2: [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (rol admin) o [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) alternativo | Depende del modo de despliegue |
 | Cifrado | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) | **Misma estrategia que el chat** — canal cifrado por TLS |
 | Hosting | [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) | Mismo CDN, ruta `/admin/` |
 | API | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (Python 3.12) | Endpoints protegidos con [JWT](https://datatracker.ietf.org/doc/html/rfc7519) + [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446). La Lambda escala a 0 cuando no hay actividad — solo se paga por uso |
@@ -355,7 +389,7 @@ Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/
 |----------|----------|-----------|---------|---------------|
 | **RAG Service** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) + [LlamaIndex](https://docs.llamaindex.ai/) | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB | HTTP/[SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), 2 réplicas. Entrada directa desde [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). Orquestación + streaming + RAG |
 | **Auth Handshake Lambda** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB, 10s timeout | Solo Opción 1. Handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) + generación de [JWT](https://datatracker.ietf.org/doc/html/rfc7519). Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
-| **Knowledge Base (KB) API** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB, 30s timeout | CRUD de documentos + presigned URLs. Escala a 0, solo se paga por uso. Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
+| **Login Lambda** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB, 30s timeout | Solo Opción 2. Login, logout, refresh token, cambio/reseteo de contraseña. Almacena usuarios (bcrypt) y refresh tokens en [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html). Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). Escala a 0 — auth es esporádico, cold start irrelevante |
 | **Knowledge Base (KB) API** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB, 30s timeout | CRUD de documentos + presigned URLs. Escala a 0, solo se paga por uso. Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
 
 #### 3.2.2 Comunicación entre Servicios
@@ -366,6 +400,8 @@ Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [RAG Service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | HTTPS (HTTP/1.1) | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) validado (API Gateway) + VPC Link | Consultas chat + SSE streaming |
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [KB API Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | CRUD documentos + presigned URLs |
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Auth Handshake Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Handshake RSA Opción 1 |
+| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Login, logout, refresh, password (Opción 2) |
+| Login Lambda | [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) | PostgreSQL (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | CRUD usuarios + refresh tokens |
 | RAG | [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) | AWS SDK | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | InvokeModel |
 | RAG | [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) | PostgreSQL (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Queries [pgvector](https://github.com/pgvector/pgvector) |
 #### 3.2.3 Pipeline RAG (Detalle)
@@ -499,10 +535,10 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 
 | Servicio | Uso | Justificación |
 |----------|-----|---------------|
-| **[Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** | Autenticación y autorización | 10K MAU gratis, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)/[OIDC](https://openid.net/specs/openid-connect-core-1_0.html), MFA, SSO |
+| **[Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** | Autenticación y autorización (alternativa a Login Lambda) | 10K MAU gratis, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)/[OIDC](https://openid.net/specs/openid-connect-core-1_0.html), MFA, SSO. Recomendamos Login Lambda para Opción 2 por costo y control |
 | **[API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)** | API entry point | $1/1M requests (vs $3.50 REST), [JWT](https://datatracker.ietf.org/doc/html/rfc7519) auth nativo |
 | **[ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)** | Orquestación de microservicios (RAG) | Sin Kubernetes, ~$50-250/mes, auto-escalado. Usar arquitectura **ARM64 (Graviton)** — ~20% más barato que x86_64 para el mismo vCPU/RAM. En desarrollo el ahorro es ~$8/mes, en producción ~$16/mes |
-| **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | KB API (CRUD documentos + presigned URLs) | Sin costo en reposo, solo se paga por ejecución. ~$0.50/mes para el volumen del proyecto |
+| **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | KB API (CRUD documentos + presigned URLs) <br/>Login Lambda (login, logout, refresh, passwords) <br/>Auth Handshake Lambda (Opción 1) | Sin costo en reposo, solo se paga por ejecución. ~$0.50/mes para KB API, ~$0.50/mes para Login Lambda. Cold start irrelevante para auth — operaciones esporádicas |
 | **[RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector)** | Base de datos principal + vectores | [pgvector](https://github.com/pgvector/pgvector) gratis, datos relacionales + vectores en una DB |
 | **[Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html)** | LLM (Claude) + Embeddings (Titan) | Sin mínimo, pago por token, [Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html). ⚠️ Cognito NO controla gasto de Bedrock. Para limitar por asesor se implementa middleware en RAG Service que lleva conteo de tokens/usuario en [DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) y rechaza si excede su cupo. Las consultas que excedan el límite se facturan como excedente |
 | **RDS + pgvector** | Semantic cache en tabla propia con embedding + índice HNSW | Sin servicio adicional. Se limpia automáticamente al subir/actualizar documentos. Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%** |
@@ -541,6 +577,7 @@ El sistema tiene un **stack único** que se replica en todos los ambientes (desa
 |----------|---------|----------|-------------------|-------------------|
 | **RAG Service** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB, **ARM64 (Graviton)** | 2 | ~$32/mes (12h) | ~$64/mes |
 | **Auth Handshake Lambda** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB | — | < $0.10/mes | < $0.10/mes |
+| **Login Lambda** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB | — | < $0.50/mes | < $0.50/mes |
 | **KB API** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB | — | < $1/mes | < $1/mes |
 | **RDS pgvector** | db.t4g.small, 50 GB gp3<br/>(incluye semantic cache) | 1 | ~$14/mes (12h) | ~$28/mes |
 | **Total servicios** | | | **~$55/mes** | **~$109/mes** |
@@ -654,7 +691,7 @@ El sistema opera en dos modalidades:
 | **Custom UI** | Sí (Hosted UI personalizable) | Sí | Limitado |
 | **Valoración** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 
-**Recomendación: [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** — Mejor balance costo/features, 10K MAU gratis, integración nativa con [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html).
+**Recomendación: [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (custom)** para Opción 2. Aunque [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) es la mejor opción gestionada, optamos por una Login Lambda porque las operaciones de auth son esporádicas — login ~1-2 veces/día, password reset ~1 vez/mes — y Lambda escala a 0 sin costo en reposo. El cold start (~200ms) es irrelevante en auth (el usuario ya espera ~1-2s). Si el cliente prefiere auth gestionado, Cognito está disponible como alternativa sin cambios en la arquitectura.
 
 #### 4.1.2 API Gateway
 
@@ -1024,8 +1061,9 @@ gantt
 |-----------|------------|
 | Setup cuenta AWS, [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html), [VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html), Security Groups | Infraestructura base [Terraform](https://developer.hashicorp.com/terraform/docs) |
 | [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) + [WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) + JWT Authorizer | Entry point con auth + rate limiting |
-| **Opción 2:** [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) User Pool, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749), [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) | Auth service funcional (solo si aplica) |
-| **Opción 2:** App SPA base con login | Host app con login integrado (solo si aplica) |
+| **Opción 2 — Login Lambda:** Endpoints `/auth/login`, `/auth/register`, `/auth/refresh`, `/auth/logout`, `/auth/password-reset`, `/auth/password-change` | Login Lambda funcional — registro, login, refresh, password |
+| **Opción 2:** App SPA base con formularios de login/registro | Host app con login integrado via Login Lambda |
+| **Opción 2 (alternativa):** [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) User Pool, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749), [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) | Auth service funcional solo si se prefiere Cognito sobre Login Lambda |
 | **Opción 1:** Auth Handshake Lambda + endpoint en [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) funcional (solo si aplica) |
 | Widget embebible recibe token desde host | Mecanismo de auth delegado funcional |
 | CI/CD: [GitHub Actions](https://docs.github.com/en/actions) + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | Pipeline de deploy a Desarrollo |
@@ -1155,6 +1193,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ECS Fargate | RAG, 1 vCPU 2 GB ARM64, apagado 12h/día | ~$32 | ~$110.400 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD + presigned URLs. ~50 invocaciones/mes | ~$0.10 | ~$345 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
+| Login Lambda | Opción 2: login, refresh, password. ~1K invocaciones/mes | < $0.50 | ~$1.725 |
 | RDS db.t4g.small<br/>(incluye semantic cache) | 50 GB gp3, apagado 12h/día (storage siempre activo) | ~$16 | ~$55.200 |
 | Bedrock (Claude Haiku) | 1K conversaciones/mes (pruebas) | ~$5 | ~$17.250 |
 | Titan Embeddings | 500 documentos | ~$0.01 | ~$35 |
@@ -1163,7 +1202,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch Logs + metric filters | Logs + métricas de latencia y errores + alarmas | ~$10 | ~$34.500 |
 | KMS + ACM | 2 keys | ~$2 | ~$6.900 |
 | Infraestructura adicional compartida | VPC, VPC Endpoint, WAF, Route53, Secrets | ~$35 | ~$120.750 |
-| **Total Desarrollo** | | **~$103/mes** | **~$354.880/mes** |
+| **Total Desarrollo** | | **~$104/mes** | **~$356.605/mes** |
 
 > **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, VPC Endpoint, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente. El semantic cache en RDS (pgvector) reemplaza a ElastiCache, ahorrando ~$10/mes en desarrollo y ~$30/mes en producción. El VPC Endpoint (PrivateLink) reemplaza al NAT Gateway, ahorrando ~$25/mes en desarrollo y ~$35/mes en producción.
 
@@ -1176,6 +1215,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ECS Fargate | RAG, 2-4 réplicas ARM64 | ~$64 | ~$220.800 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~200 invocaciones/mes × 45s | ~$0.50 | ~$1.725 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
+| Login Lambda | Opción 2: login, refresh, password. ~5K invocaciones/mes | < $0.50 | ~$1.725 |
 | RDS db.t4g.small<br/>(incluye semantic cache) | 50 GB gp3, 24/7 | ~$28 | ~$96.600 |
 | Bedrock (Claude Sonnet + Haiku) | 60K conversaciones/mes (6× respecto a estimación anterior) | ~$600 | ~$2.070.000 |
 | Titan Embeddings | 10K documentos/mes | ~$0.20 | ~$690 |
@@ -1184,7 +1224,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch + X-Ray + metric filters | Logs, métricas (latencia, errores), dashboards, alarmas | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
 | Infraestructura adicional | VPC, VPC Endpoint, WAF, Route53, Logs, Secrets, GitHub Actions | ~$65 | ~$224.250 |
-| **Total Producción** | | **~$836/mes** | **~$2.883.315/mes** |
+| **Total Producción** | | **~$837/mes** | **~$2.885.040/mes** |
 
 > **Ahorro combinado en Producción (KB Lambda + BFF + Analytics + RDS + Cache + VPC Endpoint + ARM):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. RDS db.t4g.small en vez de Aurora ahorra ~$52/mes. Cache en RDS (pgvector) en vez de ElastiCache ahorra ~$30/mes. VPC Endpoint en vez de NAT Gateway ahorra ~$35/mes. Fargate ARM64 en vez de x86_64 ahorra ~$16/mes. Total: **~$232.50/mes USD** (~$802.000 COP/mes) por ambiente 24/7.
 
@@ -1196,6 +1236,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | API Gateway HTTP | 15M requests/mes (300K consultas × ~50 llamadas internas) | $15.00 | ~$51.750 |
 | ECS Fargate | RAG, 3-6 réplicas ARM64 | ~$184 | ~$634.800 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~500 invocaciones/mes × 45s | ~$1 | ~$3.450 |
+| Login Lambda | Opción 2: ~25K invocaciones/mes | ~$1 | ~$3.450 |
 | RDS db.t4g.large<br/>(incluye semantic cache) | 100 GB gp3, HA multi-AZ | ~$112 | ~$386.400 |
 | Bedrock (Sonnet + Haiku routing) | 300K conversaciones/mes (6× respecto a estimación anterior) | ~$3.000 | ~$10.350.000 |
 | Titan Embeddings | 50K documentos/mes | ~$1 | ~$3.450 |
@@ -1204,16 +1245,16 @@ Tasa de cambio: $1 USD = $3,450 COP
 | CloudWatch + X-Ray + metric filters | Logs + métricas + dashboards + alarmas | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
 | Infraestructura adicional | VPC, VPC Endpoint, WAF, Route53, Logs, Secrets, CI/CD | ~$90 | ~$310.500 |
-| **Total Escalado** | | **~$3.601/mes** | **~$12.422.900/mes** |
+| **Total Escalado** | | **~$3.602/mes** | **~$12.426.350/mes** |
 
 ### 7.2 Proyección Anual
 
 | Mes | Fase | Ambientes activos | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
 |-----|------|-------------------|---------------------|---------------------|
-| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$355.000/mes | ~$103/mes |
-| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$931.000/mes | ~$270/mes |
-| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.238.000/mes | ~$939/mes |
-| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$12.778.000/mes | ~$3.704/mes |
+| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$357.000/mes | ~$104/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$933.000/mes | ~$271/mes |
+| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.242.000/mes | ~$941/mes |
+| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$12.783.000/mes | ~$3.706/mes |
 | **Total Año 1** | **Proyección AWS** | | **~$37.000.000-42.000.000/año** | **~$10.700-12.200/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
@@ -1230,7 +1271,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | **Semantic Cache** (pgvector en RDS) | **Optimista 68% / Normal 45% / Pesimista 25%** en costos LLM | Busca respuestas similares por embedding (umbral coseno ≥0.95) en tabla `semantic_cache`. Sin servicio adicional — usa RDS existente. **Ventaja sobre Redis:** cachea consultas parafraseadas que un hash exacto nunca capturaría. **⚠️ Riesgo para el sector funerario:** Una consulta sobre "planes para contratar" es muy distinta a "acabo de perder un ser querido". El caché puede devolver respuestas contextualmente inapropiadas si el umbral de similitud es muy bajo. Se recomienda: (a) umbral conservador (≥0.95), (b) desactivar el caché para consultas con tono emocional detectado, (c) monitorear manualmente durante el piloto. **Invalidación automática:** Al subir o actualizar documentos se ejecuta `DELETE FROM semantic_cache` |
 | **Routing inteligente** (Sonnet ↔ Haiku) | **Optimista 30% / Normal 18% / Pesimista 0%** (si se desactiva por calidad) | Tareas simples → Haiku, complejas → Sonnet |
 | **Eliminación del BFF** | **~$50/mes (24/7) por ambiente** | API Gateway → RAG ECS directo. El RAG Service maneja SSE streaming y orquestación. Ahorro fijo, sin depender de patrones de uso |
-| **[API Gateway + JWT Authorizer](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html)** | **~$25/mes** vs tener un servicio ECS dedicado a auth | Auth delegada a API Gateway (JWT validation nativa). Opción 2 usa Cognito directo (PKCE), Opción 1 usa Lambda handshake (~$0.10/mes) |
+| **[API Gateway + JWT Authorizer](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html)** | **~$25/mes** vs tener un servicio ECS dedicado a auth | Auth delegada a API Gateway (JWT validation nativa). Opción 2 usa Login Lambda para generar JWTs, Opción 1 usa Auth Handshake Lambda (~$0.10/mes) |
 | **[VPC Endpoint (PrivateLink)](https://docs.aws.amazon.com/vpc/latest/privatelink/vpce-interface.html)** para Bedrock | **~$35-45/mes** vs NAT Gateway | El RAG ECS accede a Bedrock por la red interna de AWS sin NAT Gateway. Tráfico nunca sale a internet — más seguro y más barato. Costo: ~$7-10/mes vs ~$50-70/mes de NAT Gateway |
 | **[Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html)** (1 año) | 30-50% en compute | Comprometerse a $50/mes (~$172.500 COP/mes) |
 | **[Batch Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)** | 50% en inferencia para procesamiento por lotes. Batch Bedrock permite enviar cientos de prompts en un archivo JSONL a [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html), [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) los procesa asincrónicamente (hasta 24h) a mitad de precio. Ideal para: ingestas nocturnas de documentos, generación de metadata, resúmenes automáticos de documentos, procesamiento de histórico de conversaciones | Procesamiento nocturno de documentos |
@@ -1259,7 +1300,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 | Backend (RAG, KB Lambda) | ✅ Desarrollo completo | ✅ Desarrollo completo |
 | Infraestructura AWS | ❌ A cargo del cliente (cuenta AWS) | ❌ A cargo del cliente (cuenta AWS) |
 | CI/CD (GitHub Actions) | ✅ Pipeline completo | ✅ Pipeline completo |
-| Autenticación ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749)) | ❌ El cliente usa su propio auth | ✅ Configuración completa |
+| Autenticación ([Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + bcrypt + [JWT](https://datatracker.ietf.org/doc/html/rfc7519) — o [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) alternativo) | ❌ El cliente usa su propio auth | ✅ Configuración completa |
 | Widget + RAG integrados | ✅ End-to-end | ✅ End-to-end |
 | Piloto con 5-10 asesores | ✅ Acompañamiento 2 semanas | ✅ Acompañamiento 2 semanas |
 | Documentación técnica | ✅ | ✅ |
@@ -1279,7 +1320,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 | **6 meses** | Opción 2 — App completa | 20 hrs/sem | ~480 hrs | **$70.000.000** | ~$146.000/hr (~$42 USD/hr) |
 | **3 meses (intensivo)** | Opción 2 — App completa | 40 hrs/sem | ~480 hrs | **$65.000.000** | ~$135.000/hr (~$39 USD/hr) |
 
-> **Diferencia entre opciones:** La Opción 1 (widget solo) requiere ~20% menos horas porque no incluye construir la app anfitriona ni configurar [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html). El cliente usa su propio sistema de autenticación y su propia app existente.
+> **Diferencia entre opciones:** La Opción 1 (widget solo) requiere ~20% menos horas porque no incluye construir la app anfitriona ni la [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (o [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) como alternativa). El cliente usa su propio sistema de autenticación y su propia app existente.
 >
 > **¿Es un buen precio?** Para el contexto colombiano:
 > - Desarrollador full-stack senior freelance: $100K-150K COP/hr ($29-$43 USD/hr)
@@ -1311,7 +1352,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 
 Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y el soporte continuo. El cliente paga una mensualidad que cubre costos de infraestructura + mantenimiento + soporte.
 
-> **Nota sobre precios:** En este modelo, el precio mensual es **el mismo para Opción 1 y Opción 2**. La diferencia está únicamente en el **setup inicial** (la Opción 2 requiere desarrollar la app SPA anfitriona + [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)). La mensualidad cubre el mismo soporte, mantenimiento e infraestructura base, independientemente de quién maneje el login. El cliente no paga más caro cada mes por tener su propio auth.
+> **Nota sobre precios:** En este modelo, el precio mensual es **el mismo para Opción 1 y Opción 2**. La diferencia está únicamente en el **setup inicial** (la Opción 2 requiere desarrollar la app SPA anfitriona + [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) o [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) como alternativa). La mensualidad cubre el mismo soporte, mantenimiento e infraestructura base, independientemente de quién maneje el login. El cliente no paga más caro cada mes por tener su propio auth.
 
 > ⚠️ **Importante:** Como el sistema se construye desde cero, los primeros meses no hay ingresos por uso (no hay asesores usando el sistema). Necesitamos asegurar el flujo de caja desde el inicio para cubrir costos de AWS, dominios, desarrollo y operación.
 
@@ -1331,7 +1372,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 
 | Mes | Concepto | Opción 1<br/>Widget solo<br/>y Opción 2<br/>App completa (COP) | Notas |
 |-----|----------|:----------------------------------------------------------:|-------|
-| **Mes 0** | Setup + primera mensualidad | **$15.000.000** (Op. 1) / **$18.500.000** (Op. 2) | La diferencia en setup (~$3.5M) es por desarrollar la app anfitriona + [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) en Op. 2 |
+| **Mes 0** | Setup + primera mensualidad | **$15.000.000** (Op. 1) / **$18.500.000** (Op. 2) | La diferencia en setup (~$3.5M) es por desarrollar la app anfitriona + [Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) (o [Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) alternativo) en Op. 2 |
 | **Mes 1** | Desarrollo (sprints 1-2) | ✅ Incluido | Infraestructura Desarrollo operativa, primeras demos |
 | **Mes 2** | Mensualidad | **$4.500.000** | Desarrollo continúa (sprints 3-4) |
 | **Mes 3** | Mensualidad | **$4.500.000** | Sprint 5: MVP funcional en Desarrollo |
@@ -1360,7 +1401,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 | Creación de cuenta AWS, IAM, organización multi-cuenta | $2.500.000 | $2.500.000 |
 | Configuración de infraestructura base ([VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html), subnets, [Terraform](https://developer.hashicorp.com/terraform/docs)) | $3.000.000 | $3.000.000 |
 | Registro de dominio + certificados SSL + CDN | $1.000.000 | $1.000.000 |
-| App SPA anfitriona con login ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749)) | ❌ No aplica | $2.000.000 |
+| App SPA anfitriona con login ([Login Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + bcrypt + [JWT](https://datatracker.ietf.org/doc/html/rfc7519)) | ❌ No aplica | $2.000.000 |
 | Integración del widget con sistema existente del cliente | $2.000.000 | $1.000.000 |
 | Onboarding + capacitación inicial (2 sesiones) | $500.000 | $500.000 |
 | Personalización de tema/colores/marca | $500.000 | $1.000.000 |

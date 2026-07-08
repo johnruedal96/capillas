@@ -43,7 +43,7 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 | **Caché** | [ElastiCache Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) + [Semantic Cache](https://python.langchain.com/docs/how_to/contextual_compression/) (propuesta sujeta a pruebas — el negocio funerario tiene respuestas muy sensibles al contexto: una consulta de "planes para contratar" es distinta a "acabo de perder un ser querido", lo que puede reducir el hit rate del caché semántico) | Reduce costos LLM según escenario: **Optimista ~68%**, **Normal ~45%**, **Pesimista ~25%**. Latencia <10ms en cache hit |
 | **Infraestructura** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) + [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) + [S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html) + [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html) + [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | Serverless-first, sin Kubernetes. KB API en Lambda (escala a 0) |
 | **Cifrado** | [TLS 1.3](https://datatracker.ietf.org/doc/html/rfc8446) + [HTTPS](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guia_de_referencia/HTTPS) + [AWS KMS](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html) + [ACM (TLS 1.3)](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) todo el canal + [mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/rest-api-mutual-tls.html) entre microservicios | ACM gratuito, KMS ~$3.450/key/mes COP |
-| **Observabilidad** | [OpenTelemetry](https://opentelemetry.io/docs/) + [LangFuse](https://langfuse.com/) (self-hosted) + [Grafana](https://grafana.com/docs/) | Datos soberanos, trazabilidad completa |
+| **Observabilidad** | [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) + [X-Ray](https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html) | Logs, métricas (latencia, errores), alarmas y dashboards nativos AWS. Sin costos adicionales de herramientas externas |
 | **CI/CD** | [GitHub Actions](https://docs.github.com/en/actions) + [ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html) + [ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html) | Despliegue automatizado [blue/green](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-bluegreen.html) |
 
 ### 1.3 Costo Mensual de Infraestructura AWS (COP) (Los costos de nube varían según escenario de caché, routing y consumo. Ver sección 7 para desglose detallado)
@@ -52,10 +52,10 @@ Implementar un **Asistente Comercial Inteligente** basado en arquitectura RAG (R
 
 | Etapa | Costo/mes (USD) | Costo/mes (COP) | Usuarios | Descripción |
 |-------|-----------------|------------------|----------|-------------|
-| **Desarrollo** | ~$158/mes | ~$546.000 | < 10 asesores | 1 ECS (RAG + Analytics) + Lambda (KB + Auth), apagado nocturno |
-| **Piloto (5-10 asesores)** | ~$252/mes | ~$869.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
-| **Producción (100 asesores)** | ~$1.034/mes | ~$3.567.000 | 100 asesores | 2 ECS (RAG + Analytics) + Lambda + RDS, 24/7 |
-| **Escalado (500+ asesores)** | ~$3.875/mes | ~$13.369.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
+| **Desarrollo** | ~$146/mes | ~$504.000 | < 10 asesores | 1 ECS (RAG) + Lambda (KB + Auth), apagado nocturno |
+| **Piloto (5-10 asesores)** | ~$220/mes | ~$759.000 | 5-10 asesores | Misma arquitectura que prod, dimensionamiento menor |
+| **Producción (100 asesores)** | ~$969/mes | ~$3.342.000 | 100 asesores | 1 ECS (RAG) + Lambda + RDS, 24/7 |
+| **Escalado (500+ asesores)** | ~$3.840/mes | ~$13.249.000 | 500+ asesores | HA completa, múltiples AZ, incluye infraestructura de red |
 
 ---
 
@@ -86,7 +86,6 @@ graph TB
         GW[API Gateway HTTP<br/>JWT Auth + Rate Limiting]
         AUTH[Amazon Cognito<br/>Solo en Opción 2]
         AUTH_LAMBDA[Auth Handshake Lambda<br/>Solo en Opción 1]
-        ANALYTICS[Analytics Service]
         RAG[RAG Service FastAPI<br/>SSE streaming + LlamaIndex]
         LAMBDA_KB[KB API Lambda<br/>CRUD docs + presigned URLs]
         AURORA[Aurora pgvector]
@@ -110,7 +109,6 @@ graph TB
     GW -->|"Auth handshake (Opción 1)"| AUTH_LAMBDA
     LAMBDA_KB -->|Presigned URL → subida directa| S3
     LAMBDA_KB -->|CRUD metadata| AURORA
-    GW -->|Async| ANALYTICS
     RAG -->|pgvector| AURORA
     RAG -->|Cache| REDIS
     RAG -->|Bedrock API| BEDROCK
@@ -361,7 +359,7 @@ Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/
 | **RAG Service** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) + [LlamaIndex](https://docs.llamaindex.ai/) | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB | HTTP/[SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events), 2 réplicas. Entrada directa desde [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html). Orquestación + streaming + RAG |
 | **Auth Handshake Lambda** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB, 10s timeout | Solo Opción 1. Handshake [RSA](https://datatracker.ietf.org/doc/html/rfc8017) + generación de [JWT](https://datatracker.ietf.org/doc/html/rfc7519). Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
 | **Knowledge Base (KB) API** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB, 30s timeout | CRUD de documentos + presigned URLs. Escala a 0, solo se paga por uso. Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
-| **Analytics** | [Python 3.12](https://docs.python.org/3.12/) | [FastAPI](https://fastapi.tiangolo.com/) | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 0.25 vCPU, 0.5 GB | HTTP, 1 réplica async, eventos vía [SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html) |
+| **Knowledge Base (KB) API** | [Python 3.12](https://docs.python.org/3.12/) | — | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB, 30s timeout | CRUD de documentos + presigned URLs. Escala a 0, solo se paga por uso. Gatillado por [API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) |
 
 #### 3.2.2 Comunicación entre Servicios
 
@@ -371,7 +369,6 @@ Inmediatamente después de la subida, [S3](https://docs.aws.amazon.com/AmazonS3/
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [RAG Service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | HTTPS (HTTP/1.1) | [JWT](https://datatracker.ietf.org/doc/html/rfc7519) validado (API Gateway) + VPC Link | Consultas chat + SSE streaming |
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [KB API Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | CRUD documentos + presigned URLs |
 | [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Auth Handshake Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | HTTPS (Lambda proxy) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Handshake RSA Opción 1 |
-| [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) | [Analytics](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) | HTTPS (HTTP/1.1) | [IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | Eventos async |
 | RAG | [Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html) | AWS SDK | [IAM Role](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html) | InvokeModel |
 | RAG | [RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) | PostgreSQL (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Queries [pgvector](https://github.com/pgvector/pgvector) |
 | RAG | [Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html) | Redis (TLS) | [IAM Auth](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.IAMDBAuth.html) | Cache |
@@ -417,16 +414,16 @@ flowchart TB
     L2["Nivel 2 — Clasificador<br/>Haiku vía prompt<br/>(~97% precisión en<br/>consultas complejas)"]
     L2_SIMPLE["➡ Haiku<br/>$33 COP/consulta<br/>(incluye clasificación)"]
     L2_COMPLEX["➡ Sonnet<br/>$100 COP/consulta"]
-    ANALYTICS["Analytics → log<br/>decisión + confianza"]
+    CW["CloudWatch → log<br/>decisión + confianza"]
 
     CACHE -->|Miss| L1
     L1 -->|"Saludo, horario,<br/>pregunta simple"| L1_SIMPLE
     L1 -->|"Requiere análisis"| L2
     L2 -->|"Clasifica como simple<br/>(confianza > 0.8)"| L2_SIMPLE
     L2 -->|"Clasifica como compleja"| L2_COMPLEX
-    L1_SIMPLE --> ANALYTICS
-    L2_SIMPLE --> ANALYTICS
-    L2_COMPLEX --> ANALYTICS
+    L1_SIMPLE --> CW
+    L2_SIMPLE --> CW
+    L2_COMPLEX --> CW
 ```
 
 **Nivel 1 — Reglas Heurísticas (sin costo):**
@@ -494,7 +491,7 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 | **Latencia Nivel 1** | < 1ms (regex en memoria, no hay I/O) |
 | **Latencia Nivel 2** | ~300ms (Haiku es rápido) vs ~800ms si fuera directo a Sonnet — la clasificación apenas añade 100-200ms extras sobre el tiempo de respuesta de la consulta simple |
 | **Degradación graceful** | Si Haiku clasificador falla (timeout o error), se asume COMPLEJA y se envía a Sonnet — pérdida de ahorro, no de calidad |
-| **Monitoreo** | Cada decisión se loguea en Analytics: `{"query": "hash", "nivel": 1|2, "modelo": "haiku"|"sonnet", "confianza": 0.95}` |
+| **Monitoreo** | Cada decisión se loguea en CloudWatch: `{"query": "hash", "nivel": 1|2, "modelo": "haiku"|"sonnet", "confianza": 0.95}` |
 | **Ajuste de umbrales** | El umbral de confianza (0.8) se ajusta según datos reales de producción. Si el log muestra consultas complejas mal clasificadas como simples, se sube el umbral |
 | **Override manual** | El system prompt de Sonnet puede detectar inconsistencias y forzar re-consulta si detecta que la respuesta Haiku fue insuficiente |
 | **Fallback por longitud** | Consultas con más de 150 tokens se envían directamente a Sonnet sin clasificar (asumimos que son complejas por su extensión) |
@@ -509,7 +506,7 @@ Se ejecuta antes de cualquier llamada a [Bedrock](https://docs.aws.amazon.com/be
 |----------|-----|---------------|
 | **[Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html)** | Autenticación y autorización | 10K MAU gratis, [OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749)/[OIDC](https://openid.net/specs/openid-connect-core-1_0.html), MFA, SSO |
 | **[API Gateway HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)** | API entry point | $1/1M requests (vs $3.50 REST), [JWT](https://datatracker.ietf.org/doc/html/rfc7519) auth nativo |
-| **[ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)** | Orquestación de microservicios (RAG, Analytics) | Sin Kubernetes, ~$50-250/mes, auto-escalado |
+| **[ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)** | Orquestación de microservicios (RAG) | Sin Kubernetes, ~$50-250/mes, auto-escalado |
 | **[Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | KB API (CRUD documentos + presigned URLs) | Sin costo en reposo, solo se paga por ejecución. ~$0.50/mes para el volumen del proyecto |
 | **[RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html) + [pgvector](https://github.com/pgvector/pgvector)** | Base de datos principal + vectores | [pgvector](https://github.com/pgvector/pgvector) gratis, datos relacionales + vectores en una DB |
 | **[Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html)** | LLM (Claude) + Embeddings (Titan) | Sin mínimo, pago por token, [Guardrails](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html). ⚠️ Cognito NO controla gasto de Bedrock. Para limitar por asesor se implementa middleware en RAG Service que lleva conteo de tokens/usuario en [DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html) y rechaza si excede su cupo. Las consultas que excedan el límite se facturan como excedente |
@@ -550,12 +547,11 @@ El sistema tiene un **stack único** que se replica en todos los ambientes (desa
 | **RAG Service** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 1 vCPU, 2 GB | 2 | ~$40/mes (12h) | ~$80/mes |
 | **Auth Handshake Lambda** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 256 MB | — | < $0.10/mes | < $0.10/mes |
 | **KB API** | [Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) 512 MB | — | < $1/mes | < $1/mes |
-| **Analytics** | [ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 0.25 vCPU, 0.5 GB | 1 | ~$12/mes (12h) | ~$25/mes |
 | **RDS pgvector** | db.t4g.small, 50 GB gp3 | 1 | ~$14/mes (12h) | ~$28/mes |
 | **Redis** | ElastiCache Serverless 0.5 GB | 1 | — | ~$20/mes |
-| **Total servicios** | | | **~$67/mes** | **~$154/mes** |
+| **Total servicios** | | | **~$55/mes** | **~$129/mes** |
 
-El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno).
+El ahorro del KB en Lambda vs ECS se aplica a **todos los ambientes**: ~$24.50/mes USD (~$84.500 COP/mes) por ambiente. En desarrollo el ahorro es ~$12/mes (ECS apagado 12h vs Lambda bajo demanda). Además, se eliminó el servicio BFF (0.5 vCPU, 1 GB, 2 réplicas) — un ahorro adicional de ~$50/mes por ambiente 24/7 (~$25/mes en desarrollo por apagado nocturno). También se eliminó el Analytics ECS (0.25 vCPU, 0.5 GB) — ~$25/mes por ambiente 24/7 (~$12/mes en desarrollo). Toda la observabilidad se maneja con CloudWatch nativo.
 
 > **Nota:** Los costos de infraestructura adicional (VPC, NAT Gateway, WAF, Route53, CloudWatch Logs, Secrets Manager) suman ~$80-130/mes sin importar cuántos ambientes haya — ver detalle en [sección 3.3.1](#331-servicios-aws-utilizados). Estos costos fijos se comparten entre ambientes cuando usan la misma VPC.
 
@@ -985,7 +981,7 @@ El proyecto se desarrolla con **Scrum** adaptado a un equipo de 1 persona (desar
 
 ### 6.2 Ambientes
 
-Todos los ambientes usan el **mismo stack** (RAG + KB Lambda + Analytics + RDS + Redis). La diferencia está en el dimensionamiento y el schedule de apagado:
+Todos los ambientes usan el **mismo stack** (RAG + KB Lambda + RDS + Redis). La diferencia está en el dimensionamiento y el schedule de apagado:
 
 | Ambiente | Propósito | Apagado nocturno | Período |
 |----------|-----------|------------------|---------|
@@ -1023,7 +1019,7 @@ gantt
     section Sprint 8-10: Optimizacion
     Sprint 8 - Admin KB completo           :s8, after s7, 14d
     Sprint 9 - Cache + Performance         :s9, after s8, 14d
-    Sprint 10 - Analytics + Seguridad      :s10, after s9, 14d
+    Sprint 10 - Monitoreo + Seguridad      :s10, after s9, 14d
 ```
 
 ### 6.4 Detalle de Sprints
@@ -1084,7 +1080,7 @@ gantt
 |-----------|------------|
 | Despliegue a producción | Widget + backend en producción |
 | Onboarding 5-10 asesores reales | Asesores usando el sistema |
-| Monitoreo: [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html), [X-Ray](https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html), logs | Observabilidad operativa |
+| Monitoreo: [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) + [X-Ray](https://docs.aws.amazon.com/xray/latest/devguide/aws-xray.html) | Observabilidad operativa |
 | **Reunión alignment:** Feedback de asesores, ajustes priorizados | ✅ |
 
 #### Sprint 7: Ajustes post-piloto (semana 13-14)
@@ -1114,12 +1110,12 @@ gantt
 | [Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) auto-scaling + [Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html) | Costos optimizados |
 | **Demo 9:** Rendimiento medido y documentado | ✅ |
 
-#### Sprint 10: Analytics + Seguridad (semana 19-20)
+#### Sprint 10: Monitoreo + Seguridad (semana 19-20)
 
 | Actividad | Entregable |
 |-----------|------------|
-| Analytics Service + dashboard de métricas | Dashboard con uso, costos, satisfacción |
-| [LangFuse](https://langfuse.com/) + [Grafana](https://grafana.com/docs/) | Observabilidad completa |
+| [CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html) dashboards + metric filters + alarms | Dashboard de latencia P50/P90/P99, tasa de errores, request count |
+| Logs estructurados JSON desde RAG ECS (query, respuesta, tokens, modelo) | Evaluación de respuestas vía Logs Insights + pipeline RAGAS |
 | Hardening de seguridad ([WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html), rate limiting, audit) | Seguridad reforzada |
 | Documentación técnica + manuales | Documentación completa |
 | **Demo 10:** Sistema completo entregado, documentación final | ✅ |
@@ -1162,7 +1158,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, < 10 MAU | $0.00 | $0 |
 | API Gateway HTTP | 10K requests/mes | $0.01 | ~$35 |
-| ECS Fargate | RAG + Analytics, apagados 12h/día | ~$52 | ~$179.400 |
+| ECS Fargate | RAG, apagado 12h/día | ~$40 | ~$138.000 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD + presigned URLs. ~50 invocaciones/mes | ~$0.10 | ~$345 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
 | RDS db.t4g.small | 50 GB gp3, apagado 12h/día (storage siempre activo) | ~$16 | ~$55.200 |
@@ -1171,10 +1167,10 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ElastiCache (Redis) | Serverless, 0.5 GB (auto-pause cuando sin uso) | ~$10 | ~$34.500 |
 | S3 + CloudFront | 5 GB, 10K requests | ~$2 | ~$6.900 |
 | Step Functions | Pruebas de ingesta | ~$1 | ~$3.450 |
-| CloudWatch Logs | Logs de servicios + debugging | ~$10 | ~$34.500 |
+| CloudWatch Logs + metric filters | Logs + métricas de latencia y errores + alarmas | ~$10 | ~$34.500 |
 | KMS + ACM | 2 keys | ~$2 | ~$6.900 |
 | Infraestructura adicional compartida | VPC, NAT, WAF, Route53, Secrets | ~$60 | ~$207.000 |
-| **Total Desarrollo** | | **~$158/mes** | **~$545.865/mes** |
+| **Total Desarrollo** | | **~$146/mes** | **~$504.380/mes** |
 
 > **Nota:** Los servicios ECS y RDS se apagan automáticamente vía EventBridge + script fuera del horario laboral (8pm-7am + findes). Los servicios serverless (Lambda, API Gateway, Cognito, Bedrock) no se apagan porque su costo es marginal y escalan a 0. La infraestructura adicional (VPC, NAT, WAF) es compartida entre ambientes y no se apaga. El ahorro por apagado es de ~50% sobre el compute del ambiente. La eliminación del BFF ahorra ~$25/mes adicionales en desarrollo y ~$50/mes en producción. El ahorro del KB en Lambda vs ECS es de **~$12/mes USD** (~$41.400 COP/mes) en este ambiente.
 
@@ -1184,7 +1180,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, 100 MAU | $0.00 | $0 |
 | API Gateway HTTP | 3M requests/mes (60K consultas × ~50 llamadas internas) | $3.00 | ~$10.350 |
-| ECS Fargate | RAG + Analytics, 2-4 réplicas | ~$145 | ~$500.250 |
+| ECS Fargate | RAG, 2-4 réplicas | ~$80 | ~$276.000 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~200 invocaciones/mes × 45s | ~$0.50 | ~$1.725 |
 | Auth Handshake Lambda | Opción 1: handshakes RSA | < $0.10 | ~$345 |
 | Aurora Serverless v2 | 3 ACU, 50 GB (más conexiones concurrentes) | ~$80 | ~$276.000 |
@@ -1193,12 +1189,12 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ElastiCache (Redis) | Serverless, 2 GB (más volumen de caché) | ~$30 | ~$103.500 |
 | S3 + CloudFront (widget + KB Admin) | 20 GB, 100K requests | ~$7 | ~$24.150 |
 | Step Functions | Ingesta documentos + pipeline KB | ~$5 | ~$17.250 |
-| CloudWatch + X-Ray | Logs + trazas (6× más logs de Bedrock) | ~$60 | ~$207.000 |
+| CloudWatch + X-Ray + metric filters | Logs, métricas (latencia, errores), dashboards, alarmas | ~$60 | ~$207.000 |
 | KMS + ACM | 3 keys | ~$3 | ~$10.350 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, GitHub Actions | ~$100 | ~$345.000 |
-| **Total Producción** | | **~$1.034/mes** | **~$3.567.215/mes** |
+| **Total Producción** | | **~$969/mes** | **~$3.342.215/mes** |
 
-> **Ahorro combinado en Producción (KB Lambda + eliminación BFF):** El KB en Lambda ahorra ~$24.50/mes vs un ECS 24/7. La eliminación del BFF (0.5 vCPU, 1 GB, 2 réplicas) ahorra ~$50/mes. Total: **~$74.50/mes USD** (~$257.025 COP/mes) por ambiente 24/7. En desarrollo el ahorro es ~$37/mes (apagado nocturno).
+> **Ahorro combinado en Producción (KB Lambda + eliminación BFF + eliminación Analytics):** KB Lambda ahorra ~$24.50/mes vs ECS 24/7. Eliminar BFF ahorra ~$50/mes. Eliminar Analytics ahorra ~$25/mes. Total: **~$99.50/mes USD** (~$343.275 COP/mes) por ambiente 24/7.
 
 #### Escalado (500+ asesores)
 
@@ -1206,7 +1202,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 |----------|--------------|-----------------|------------------|
 | Cognito | Essentials, 500-1000 MAU | ~$3 | ~$10.350 |
 | API Gateway HTTP | 15M requests/mes (300K consultas × ~50 llamadas internas) | $15.00 | ~$51.750 |
-| ECS Fargate | RAG + Analytics, 3-6 réplicas | ~$250 | ~$862.500 |
+| ECS Fargate | RAG, 3-6 réplicas | ~$230 | ~$793.500 |
 | [Lambda KB API](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html) | CRUD documentos + presigned URLs. ~500 invocaciones/mes × 45s | ~$1 | ~$3.450 |
 | Aurora Serverless v2 | 6 ACU, 100 GB HA | ~$200 | ~$690.000 |
 | Bedrock (Sonnet + Haiku routing) | 300K conversaciones/mes (6× respecto a estimación anterior) | ~$3.000 | ~$10.350.000 |
@@ -1214,21 +1210,21 @@ Tasa de cambio: $1 USD = $3,450 COP
 | ElastiCache (Redis) | Serverless, 10 GB (5× más volumen de caché) | ~$80 | ~$276.000 |
 | S3 + CloudFront | 100 GB, 500K requests | ~$20 | ~$69.000 |
 | Step Functions | Ingesta + workflows | ~$20 | ~$69.000 |
-| CloudWatch + X-Ray | Logs + trazas (6× más logs) | ~$150 | ~$517.500 |
+| CloudWatch + X-Ray + metric filters | Logs + métricas + dashboards + alarmas | ~$150 | ~$517.500 |
 | KMS + ACM | 5 keys | ~$5 | ~$17.250 |
 | Infraestructura adicional | VPC, NAT, WAF, Route53, Logs, Secrets, CI/CD | ~$130 | ~$448.500 |
-| **Total Escalado** | | **~$3.875/mes** | **~$13.368.750/mes** |
-| **Total Escalado** | | **~$3.875/mes** | **~$13.368.750/mes** |
+| **Total Escalado** | | **~$3.840/mes** | **~$13.248.750/mes** |
+| **Total Escalado** | | **~$3.840/mes** | **~$13.248.750/mes** |
 
 ### 7.2 Proyección Anual
 
 | Mes | Fase | Ambientes activos | Costo AWS/mes (COP) | Costo AWS/mes (USD) |
 |-----|------|-------------------|---------------------|---------------------|
-| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$546.000/mes | ~$158/mes |
-| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$810.000/mes | ~$235/mes |
-| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$4.113.000/mes | ~$1.192/mes |
-| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$4.169.000/mes | ~$1.208/mes |
-| **Total Año 1** | **Proyección AWS** | | **~$30.400.000-36.800.000/año** | **~$8.800-10.700/año** |
+| 1-4 | Desarrollo (sprints 1-4) | Desarrollo (apagado nocturno) | ~$504.000/mes | ~$146/mes |
+| 5-6 | Piloto 5-10 asesores (sprints 5-6) | Desarrollo + Piloto 24/7 | ~$1.263.000/mes | ~$366/mes |
+| 7-10 | Producción 100 asesores (sprints 7-10) | Desarrollo + Producción | ~$3.846.000/mes | ~$1.115/mes |
+| 11-12 | Escalamiento 200-500 (sprints 11-12) | Desarrollo + Escalado | ~$13.752.000/mes | ~$3.986/mes |
+| **Total Año 1** | **Proyección AWS** | | **~$47.000.000-52.000.000/año** | **~$13.700-15.100/año** |
 
 ### 7.3 Estrategias de Optimización de Costos
 
@@ -1250,7 +1246,7 @@ Tasa de cambio: $1 USD = $3,450 COP
 | **[KB API en Lambda](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html)** | **~$24/mes** (~$83.000 COP/mes) vs un servicio ECS 24/7 | Las operaciones del KB Admin (subir, listar, eliminar) son esporádicas. Lambda escala a 0 y solo cobra por uso. A ~200 operaciones/mes × ~45s, el costo es < $1/mes vs ~$25/mes de un ECS 0.5 vCPU 24/7 |
 | **[CloudFront free tier](https://aws.amazon.com/free/)** | 1TB/mes gratis | Aprovechar los primeros meses |
 | **[S3 Intelligent Tiering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html)** | Hasta 40% en storage | Datos de conversaciones con acceso variable |
-| **Escenarios de ahorro combinado total** | **Optimista: ~60% / Normal: ~40% / Pesimista: ~15%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$3.6M COP/mes → Optimista ~$1.4M; Normal ~$2.2M; Pesimista ~$3.0M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF y el reemplazo de servicios ECS por Lambda (KB API) reducen la base estructural de costos |
+| **Escenarios de ahorro combinado total** | **Optimista: ~60% / Normal: ~40% / Pesimista: ~15%** sobre el costo total de infraestructura | **En números (prod 100 ases):** base ~$3.34M COP/mes → Optimista ~$1.3M; Normal ~$2.0M; Pesimista ~$2.8M. **Las tablas de sección 7 muestran costos SIN descuento** — son los costos base. Los descuentos de optimización se aplican sobre esos valores. Adicionalmente, la eliminación del BFF, Analytics y el reemplazo de servicios ECS por Lambda (KB API) reducen la base estructural de costos |
 
 ---
 
@@ -1268,7 +1264,7 @@ El cliente contrata el desarrollo, implementación y entrega del sistema. El cli
 |-----------|:------------------------:|:--------------------------:|
 | Frontend (Widget Lit 3) | ✅ Desarrollo completo | ✅ Desarrollo completo |
 | App anfitriona SPA con login | ❌ A cargo del cliente | ✅ Desarrollo completo |
-| Backend (RAG, KB Lambda, Analytics) | ✅ Desarrollo completo | ✅ Desarrollo completo |
+| Backend (RAG, KB Lambda) | ✅ Desarrollo completo | ✅ Desarrollo completo |
 | Infraestructura AWS | ❌ A cargo del cliente (cuenta AWS) | ❌ A cargo del cliente (cuenta AWS) |
 | CI/CD (GitHub Actions) | ✅ Pipeline completo | ✅ Pipeline completo |
 | Autenticación ([Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html) + [OAuth](https://datatracker.ietf.org/doc/html/rfc6749)) | ❌ El cliente usa su propio auth | ✅ Configuración completa |
@@ -1412,7 +1408,7 @@ Nosotros creamos y administramos la cuenta AWS, el hosting, la infraestructura y
 > **¿Qué incluyen los honorarios de gestión técnica?**
 > - **Soporte en horario laboral (L-V 8am-6pm):** Resolución de dudas, bugs, y solicitudes del equipo de Capillas. Sin límite de horas. Fuera de este horario aplica cargo extra ($120.000/hr, ver sección 8.2.9).
 > - **Mantenimiento post-estabilización:** Esfuerzo estimado de ~6-10 hrs/mes para correcciones, mejoras menores, y ajustes que surjan con el uso real.
-> - **Monitoreo 24/7 automatizado:** Alertas de disponibilidad, errores, y degradación en los servicios (RAG, Analytics) y la Lambda KB. No se monitorea manualmente — el sistema alerta cuando algo pasa y nosotros respondemos.
+> - **Monitoreo 24/7 automatizado:** Alertas de disponibilidad, errores, y degradación en los servicios (RAG, Lambda KB) vía CloudWatch. No se monitorea manualmente — el sistema alerta cuando algo pasa y nosotros respondemos.
 > - **Actualizaciones de seguridad:** Dependencias (npm, pip), parches críticos de contenedores, renovación de certificados SSL. Se aplican a medida que los proveedores liberan parches, no en releases mensuales fijos.
 > - **Gestión de KB Admin:** Procesamiento de los documentos que el cliente sube a la plataforma — chunking, embedding, y carga a pgvector. Hasta 100 documentos/mes.
 > - **Utilidad incluida:** Todo lo anterior incluye nuestro margen. No hay cargos ocultos ni markup sobre AWS.
@@ -1517,7 +1513,7 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 | Sprint 7 | 13-14 | Ajustes post-piloto | — |
 | Sprint 8 | 15-16 | KB Admin completo | **$7.500.000**<br/>Mes 5 |
 | Sprint 9 | 17-18 | Cache + performance | — |
-| Sprint 10 | 19-20 | Analytics + seguridad + documentación | **$7.500.000**<br/>Mes 6+ |
+| Sprint 10 | 19-20 | Monitoreo + seguridad + documentación | **$7.500.000**<br/>Mes 6+ |
 
 ### 8.3 Comparativa y Recomendación
 
@@ -1588,7 +1584,6 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 - pgvector GitHub: https://github.com/pgvector/pgvector
 - OAuth 2.0 RFC 6749: https://datatracker.ietf.org/doc/html/rfc6749
 - OAuth 2.1 BCP (RFC 9700): https://datatracker.ietf.org/doc/rfc9700/
-- OpenTelemetry Documentation: https://opentelemetry.io/docs/
 
 - RAGAS Evaluation: https://docs.ragas.io/
 - DeepEval (Confident AI): https://docs.confident-ai.com/
@@ -1605,7 +1600,6 @@ Combinamos la predictibilidad del peso fijo con un mecanismo de ajuste automáti
 
 - MTEB Leaderboard (Embeddings): https://huggingface.co/spaces/mteb/leaderboard
 - RAGAS Evaluation: https://docs.ragas.io/
-- LangFuse (Observabilidad): https://langfuse.com/
 - Bedrock Knowledge Bases: https://aws.amazon.com/bedrock/knowledge-bases/
 - Claude Prompt Engineering: https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering
 
